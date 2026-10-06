@@ -1,13 +1,10 @@
 --[[
-    Fisk Grow v3.2
-    - Красивый дизайн + сворачивание в маленькую панельку
-    - Скорость: НЕ трогает WalkSpeed (анти-чит не детектит, не переносит назад)
-    - ESP сущностей на всех этажах; этаж помечается ЦИФРОЙ в табличке [1] [2] [BD] [AR] [ST]
-    - Выбор: какие сущности видны (поэтажные секции с галочками)
-    - Авто-обнаружение неизвестных сущностей
-    - Уведомления о появлении сущностей
-    - Плавающая кнопка ◈ (тап) или RightShift: скрыть / показать меню
-    - Работает на Xeno и Delta (мобильная версия)
+    Fisk Grow v3.3
+    - ПРЯМОУГОЛЬНАЯ панель с разделами-аккордеонами (все функции внутри пунктов)
+    - ФИКС кликабельности: все кнопки работают через Activated + Active (тап/мышь)
+    - Уведомления: чистые карточки, полностью удаляются, без следов
+    - Новые кнопки: сворачивание ▾ / закрытие ⏻, плавающая кнопка — градиентный круг
+    - Скорость без WalkSpeed; ESP сущностей на всех этажах
 ]]
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -26,17 +23,16 @@ local State = {
     espOn = true,
     autoOn = true,
     notifyOn = true,
-    entityVisible = {}, -- [отображаемое имя] = true/false
+    entityVisible = {},
 }
 local MIN_SPEED, MAX_SPEED = 16, 80
-local FULL_SIZE = UDim2.fromOffset(330, 430)
-local COLLAPSED_SIZE = UDim2.fromOffset(330, 44)
+local FULL_SIZE = UDim2.fromOffset(340, 480)
+local COLLAPSED_SIZE = UDim2.fromOffset(340, 42)
 
 -- ========= Этажи и сущности =========
--- Этаж: id помечается цифрой/тегом в ESP-табличке
 local FLOORS = {
-    { id = "1",  title = "1 · ОТЕЛЬ" },
-    { id = "2",  title = "2 · ШАХТЫ" },
+    { id = "1",  title = "ЭТАЖ 1 · ОТЕЛЬ" },
+    { id = "2",  title = "ЭТАЖ 2 · ШАХТЫ" },
     { id = "BD", title = "BACKDOOR" },
     { id = "AR", title = "АРХИВЫ" },
     { id = "ST", title = "ЛЕСТНИЦЫ" },
@@ -44,7 +40,6 @@ local FLOORS = {
 
 -- [имя модели] = { отображаемое имя, этаж }
 local ENTITIES = {
-    -- Этаж 1: Отель
     RushMoving = {"Rush", "1"}, AmbushMoving = {"Ambush", "1"},
     A60 = {"A-60", "1"}, A120 = {"A-120", "1"}, A90 = {"A-90", "1"}, A200 = {"A-200", "1"},
     Eyes = {"Eyes", "1"}, Halt = {"Halt", "1"}, Screech = {"Screech", "1"},
@@ -54,31 +49,26 @@ local ENTITIES = {
     FigureRig = {"Figure", "1"}, FigureRagdoll = {"Figure", "1"},
     Glitch = {"Glitch", "1"}, Void = {"Void", "1"}, Shadow = {"Shadow", "1"}, Surge = {"Surge", "1"},
     Dread = {"Dread", "1"}, Blitz = {"Blitz", "1"},
-    -- Этаж 2: Шахты (включая Сад)
     Giggle = {"Giggle", "2"}, GiggleCeiling = {"Giggle", "2"},
     Grumble = {"Grumble", "2"}, GrumbleRig = {"Grumble", "2"},
     Gloombat = {"Gloombat", "2"}, GloombatSwarm = {"Gloombat", "2"},
-    -- Backdoor
     BackdoorRush = {"Haste", "BD"}, Haste = {"Haste", "BD"},
     BackdoorLookman = {"Lookman", "BD"}, Lookman = {"Lookman", "BD"},
     Vacuum = {"Vacuum", "BD"},
-    -- Архивы (бывшие Rooms)
     Honcho = {"Honcho", "AR"},
     Drone = {"Drone", "AR"}, Drones = {"Drone", "AR"},
     Bash = {"Bash", "AR"}, Ransom = {"Ransom", "AR"}, Scribbles = {"Scribbles", "AR"},
     Teller = {"Teller", "AR"},
     ForgetMeNot = {"Forget-Me-Not", "AR"}, ForgetMeNots = {"Forget-Me-Not", "AR"},
     Alma = {"Alma", "AR"}, Portrait = {"Portrait", "AR"}, Fih = {"Fih", "AR"},
-    -- Лестницы (The Stairwell)
     Creak = {"Creak", "ST"}, Noise = {"Noise", "ST"}, Hijack = {"Hijack", "ST"},
     Stem = {"Stem", "ST"}, Stems = {"Stem", "ST"},
     CeramicStem = {"Stem", "ST"}, ClayStem = {"Stem", "ST"},
     Cobbler = {"Cobbler", "ST"}, Meld = {"Meld", "ST"}, Crusher = {"Crusher", "ST"},
 }
 
--- уникальные сущности по этажам (для меню)
 local floorEntities = {}
-for id, _ in pairs(FLOORS) do floorEntities[FLOORS[id].id] = {} end
+for _, f in ipairs(FLOORS) do floorEntities[f.id] = {} end
 local seen = {}
 for _, v in pairs(ENTITIES) do
     local name, fid = v[1], v[2]
@@ -87,10 +77,9 @@ for _, v in pairs(ENTITIES) do
         table.insert(floorEntities[fid], name)
     end
 end
-for id, _ in pairs(FLOORS) do table.sort(floorEntities[FLOORS[id].id]) end
-for name, _ in pairs(seen) do State.entityVisible[name] = true end
+for _, f in ipairs(FLOORS) do table.sort(floorEntities[f.id]) end
+for name in pairs(seen) do State.entityVisible[name] = true end
 
--- НЕ считать сущностями при авто-обнаружении
 local IGNORE = {
     Camera = true, Terrain = true, CurrentRooms = true, Drops = true,
     DroppedItems = true, Pickups = true, Effects = true, Live = true,
@@ -117,7 +106,7 @@ end
 
 local parentGui = getParent()
 pcall(function()
-    local old = parentGui:FindFirstChild("DoorsHelper")
+    local old = parentGui:FindFirstChild("FiskGrow")
     if old then old:Destroy() end
 end)
 
@@ -141,11 +130,10 @@ end
 
 -- ========= Палитра =========
 local COLORS = {
-    bg       = Color3.fromRGB(16, 16, 24),
-    bgTransp = 0.08,
-    bar      = Color3.fromRGB(24, 24, 36),
-    item     = Color3.fromRGB(30, 30, 44),
-    itemHover= Color3.fromRGB(38, 38, 56),
+    bg       = Color3.fromRGB(14, 14, 20),
+    bar      = Color3.fromRGB(22, 22, 32),
+    item     = Color3.fromRGB(28, 28, 40),
+    itemHover= Color3.fromRGB(36, 36, 52),
     accent   = Color3.fromRGB(167, 139, 250),
     accent2  = Color3.fromRGB(99, 102, 241),
     accent3  = Color3.fromRGB(56, 189, 248),
@@ -166,7 +154,7 @@ local GRADIENT = ColorSequence.new({
 -- ========= UI-хелперы =========
 local function corner(parent, r)
     local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, r or 10)
+    c.CornerRadius = UDim.new(0, r or 4)
     c.Parent = parent
     return c
 end
@@ -193,155 +181,127 @@ local function label(parent, text, size, color, font)
     return l
 end
 
-local function smallButton(parent, text)
+local function makeBtn(parent)
     local b = Instance.new("TextButton")
-    b.Text = text
-    b.TextSize = 16
-    b.Font = Enum.Font.GothamBold
-    b.TextColor3 = COLORS.text
-    b.BackgroundColor3 = COLORS.off
     b.AutoButtonColor = false
+    b.Active = true
+    b.Text = ""
+    b.BackgroundColor3 = COLORS.item
+    b.BorderSizePixel = 0
     b.Parent = parent
-    corner(b, 6)
-    b.MouseEnter:Connect(function()
-        TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = COLORS.itemHover }):Play()
-    end)
-    b.MouseLeave:Connect(function()
-        TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = COLORS.off }):Play()
-    end)
     return b
 end
 
-local function smallBox(parent, text)
-    local t = Instance.new("TextBox")
-    t.Text = text
-    t.TextSize = 14
-    t.Font = Enum.Font.GothamBold
-    t.TextColor3 = COLORS.accent
-    t.PlaceholderColor3 = COLORS.sub
-    t.BackgroundColor3 = COLORS.bg
-    t.BackgroundTransparency = 0.3
-    t.ClearTextOnFocus = false
-    t.Parent = parent
-    corner(t, 6)
-    stroke(t, COLORS.accent2, 0.75, 1)
-    return t
+local function hoverFx(b, from, to)
+    b.MouseEnter:Connect(function()
+        TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = to }):Play()
+    end)
+    b.MouseLeave:Connect(function()
+        TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = from }):Play()
+    end)
 end
 
--- ========= Главное окно =========
+-- ========= Главное окно (прямоугольное) =========
 local main = Instance.new("Frame")
 main.Name = "Main"
 main.Size = FULL_SIZE
-main.Position = UDim2.new(0.5, -165, 0.5, -215)
+main.Position = UDim2.new(0.5, -170, 0.5, -240)
 main.BackgroundColor3 = COLORS.bg
-main.BackgroundTransparency = COLORS.bgTransp
+main.BackgroundTransparency = 0.06
 main.BorderSizePixel = 0
 main.ClipsDescendants = true
 main.Parent = gui
-corner(main, 14)
-stroke(main, COLORS.accent2, 0.55, 1.2)
+corner(main, 0)
+stroke(main, COLORS.accent2, 0.5, 1.2)
 
 do
     local sh = Instance.new("Frame")
     sh.Name = "Shadow"
-    sh.Size = UDim2.new(1, 18, 1, 18)
-    sh.Position = UDim2.fromOffset(-9, -6)
+    sh.Size = UDim2.new(1, 16, 1, 16)
+    sh.Position = UDim2.fromOffset(-8, -5)
     sh.BackgroundColor3 = Color3.new(0, 0, 0)
     sh.BackgroundTransparency = 0.55
     sh.BorderSizePixel = 0
     sh.ZIndex = 0
     sh.Parent = main
-    corner(sh, 18)
+    corner(sh, 0)
 end
 main.ZIndex = 1
 
 -- Заголовок
 local top = Instance.new("Frame")
-top.Size = UDim2.new(1, 0, 0, 44)
+top.Name = "TopBar"
+top.Size = UDim2.new(1, 0, 0, 42)
 top.BackgroundColor3 = COLORS.bar
-top.BackgroundTransparency = 0.15
 top.BorderSizePixel = 0
 top.ZIndex = 2
 top.Parent = main
-corner(top, 14)
+corner(top, 0)
 
-local topFix = Instance.new("Frame")
-topFix.Size = UDim2.new(1, 0, 0, 14)
-topFix.Position = UDim2.new(0, 0, 1, -14)
-topFix.BackgroundColor3 = COLORS.bar
-topFix.BackgroundTransparency = 0.15
-topFix.BorderSizePixel = 0
-topFix.ZIndex = 2
-topFix.Parent = top
-
-local topGrad = Instance.new("UIGradient")
-topGrad.Color = GRADIENT
-topGrad.Transparency = NumberSequence.new(0.86)
-topGrad.Parent = top
+local topLine = Instance.new("Frame")
+topLine.Size = UDim2.new(1, 0, 0, 2)
+topLine.Position = UDim2.new(0, 0, 1, -2)
+topLine.BorderSizePixel = 0
+topLine.ZIndex = 2
+topLine.Parent = top
+local tlGrad = Instance.new("UIGradient")
+tlGrad.Color = GRADIENT
+tlGrad.Parent = topLine
 
 local logo = Instance.new("Frame")
-logo.Size = UDim2.fromOffset(24, 24)
-logo.Position = UDim2.fromOffset(12, 10)
-logo.BackgroundColor3 = COLORS.accent2
+logo.Size = UDim2.fromOffset(22, 22)
+logo.Position = UDim2.fromOffset(10, 10)
 logo.BorderSizePixel = 0
 logo.ZIndex = 3
 logo.Parent = top
-corner(logo, 7)
+corner(logo, 0)
 local lg = Instance.new("UIGradient")
 lg.Color = GRADIENT
 lg.Parent = logo
-local logoIcon = label(logo, "◈", 14, Color3.new(1, 1, 1), Enum.Font.GothamBold)
+local logoIcon = label(logo, "◈", 13, Color3.new(1, 1, 1), Enum.Font.GothamBold)
 logoIcon.Size = UDim2.fromScale(1, 1)
 logoIcon.TextXAlignment = Enum.TextXAlignment.Center
 logoIcon.ZIndex = 4
 
-local title = label(top, "Fisk Grow", 15, COLORS.text, Enum.Font.GothamBold)
-title.Position = UDim2.fromOffset(44, 0)
-title.Size = UDim2.new(1, -130, 1, 0)
+local title = label(top, "Fisk Grow", 14, COLORS.text, Enum.Font.GothamBold)
+title.Position = UDim2.fromOffset(40, 0)
+title.Size = UDim2.new(1, -150, 1, 0)
 title.ZIndex = 3
 
-local ver = label(top, "v3.2", 11, COLORS.sub, Enum.Font.GothamMedium)
-ver.Position = UDim2.new(1, -128, 0, 0)
-ver.Size = UDim2.fromOffset(30, 44)
+local ver = label(top, "v3.3", 11, COLORS.sub)
+ver.Position = UDim2.new(1, -120, 0, 0)
+ver.Size = UDim2.fromOffset(30, 42)
 ver.TextXAlignment = Enum.TextXAlignment.Center
 ver.ZIndex = 3
 
-local collapseBtn = Instance.new("TextButton")
+-- Кнопка сворачивания: акцентный квадрат со стрелкой
+local collapseBtn = makeBtn(top)
 collapseBtn.Size = UDim2.fromOffset(26, 26)
-collapseBtn.Position = UDim2.new(1, -62, 0.5, -13)
+collapseBtn.Position = UDim2.new(1, -64, 0.5, -13)
 collapseBtn.BackgroundColor3 = COLORS.off
-collapseBtn.BackgroundTransparency = 0.2
-collapseBtn.Text = "—"
-collapseBtn.TextSize = 15
+collapseBtn.Text = "▾"
+collapseBtn.TextSize = 14
 collapseBtn.Font = Enum.Font.GothamBold
-collapseBtn.TextColor3 = COLORS.text
+collapseBtn.TextColor3 = COLORS.accent
 collapseBtn.ZIndex = 3
-collapseBtn.Parent = top
-corner(collapseBtn, 8)
+corner(collapseBtn, 0)
+stroke(collapseBtn, COLORS.accent2, 0.5, 1)
+hoverFx(collapseBtn, COLORS.off, COLORS.itemHover)
 
-local closeBtn = Instance.new("TextButton")
+-- Кнопка закрытия: красная с иконкой питания
+local closeBtn = makeBtn(top)
 closeBtn.Size = UDim2.fromOffset(26, 26)
 closeBtn.Position = UDim2.new(1, -32, 0.5, -13)
 closeBtn.BackgroundColor3 = COLORS.danger
-closeBtn.BackgroundTransparency = 0.3
-closeBtn.Text = "×"
-closeBtn.TextSize = 17
+closeBtn.Text = "⏻"
+closeBtn.TextSize = 14
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextColor3 = COLORS.text
+closeBtn.TextColor3 = Color3.new(1, 1, 1)
 closeBtn.ZIndex = 3
-closeBtn.Parent = top
-corner(closeBtn, 8)
+corner(closeBtn, 0)
+hoverFx(closeBtn, COLORS.danger, Color3.fromRGB(255, 100, 120))
 
-for _, b in ipairs({collapseBtn, closeBtn}) do
-    b.MouseEnter:Connect(function()
-        TweenService:Create(b, TweenInfo.new(0.12), { BackgroundTransparency = 0 }):Play()
-    end)
-    b.MouseLeave:Connect(function()
-        TweenService:Create(b, TweenInfo.new(0.12), { BackgroundTransparency = 0.3 }):Play()
-    end)
-end
-
--- Перетаскивание
+-- Перетаскивание за заголовок
 do
     local dragging, dragStart, startPos
     connect(top.InputBegan, function(i)
@@ -364,10 +324,11 @@ end
 
 -- Содержимое
 local content = Instance.new("ScrollingFrame")
+content.Name = "Content"
 content.BackgroundTransparency = 1
 content.BorderSizePixel = 0
-content.Position = UDim2.fromOffset(12, 52)
-content.Size = UDim2.new(1, -24, 1, -62)
+content.Position = UDim2.fromOffset(10, 50)
+content.Size = UDim2.new(1, -20, 1, -58)
 content.ScrollBarThickness = 3
 content.ScrollBarImageColor3 = COLORS.accent
 content.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -383,168 +344,248 @@ layout.Parent = content
 local order = 0
 local function nextOrder() order += 1 return order end
 
-local function header(text)
-    local row = Instance.new("Frame")
-    row.BackgroundTransparency = 1
-    row.Size = UDim2.new(1, -4, 0, 20)
-    row.LayoutOrder = nextOrder()
-    row.Parent = content
+-- ========= Раздел-аккордеон =========
+local function makeSection(titleText, defaultOpen)
+    local wrap = Instance.new("Frame")
+    wrap.BackgroundTransparency = 1
+    wrap.Size = UDim2.new(1, 0, 0, 0)
+    wrap.AutomaticSize = Enum.AutomaticSize.Y
+    wrap.LayoutOrder = nextOrder()
+    wrap.Parent = content
 
-    local l = label(row, text, 11, COLORS.accent, Enum.Font.GothamBold)
-    l.Size = UDim2.fromOffset(200, 20)
+    local wl = Instance.new("UIListLayout")
+    wl.Padding = UDim.new(0, 4)
+    wl.SortOrder = Enum.SortOrder.LayoutOrder
+    wl.Parent = wrap
 
-    local line = Instance.new("Frame")
-    line.Size = UDim2.new(1, -l.TextBounds.X - 12, 0, 1)
-    line.Position = UDim2.new(0, l.TextBounds.X + 8, 0.5, 0)
-    line.BackgroundColor3 = COLORS.accent2
-    line.BackgroundTransparency = 0.65
-    line.BorderSizePixel = 0
-    line.Parent = row
-    return row
-end
+    local headerBtn = makeBtn(wrap)
+    headerBtn.Size = UDim2.new(1, 0, 0, 32)
+    headerBtn.BackgroundColor3 = COLORS.item
+    headerBtn.LayoutOrder = nextOrder()
+    headerBtn.ZIndex = 3
+    hoverFx(headerBtn, COLORS.item, COLORS.itemHover)
 
--- Компактный тумблер (для списка сущностей)
-local function makeSmallToggle(text, default, callback)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -4, 0, 30)
-    row.BackgroundColor3 = COLORS.item
-    row.BackgroundTransparency = 0.25
-    row.BorderSizePixel = 0
-    row.LayoutOrder = nextOrder()
-    row.Parent = content
-    corner(row, 8)
+    local accentBar = Instance.new("Frame")
+    accentBar.Size = UDim2.fromOffset(3, 32)
+    accentBar.BackgroundColor3 = COLORS.accent2
+    accentBar.BorderSizePixel = 0
+    accentBar.ZIndex = 4
+    accentBar.Parent = headerBtn
+    local abg = Instance.new("UIGradient")
+    abg.Color = GRADIENT
+    abg.Parent = accentBar
 
-    local l = label(row, text, 13)
-    l.Position = UDim2.fromOffset(10, 0)
-    l.Size = UDim2.new(1, -56, 1, 0)
+    local ttl = label(headerBtn, titleText, 12, COLORS.text, Enum.Font.GothamBold)
+    ttl.Position = UDim2.fromOffset(14, 0)
+    ttl.Size = UDim2.new(1, -40, 1, 0)
+    ttl.ZIndex = 4
 
-    local pill = Instance.new("TextButton")
-    pill.Text = ""
-    pill.AutoButtonColor = false
-    pill.Size = UDim2.fromOffset(36, 20)
-    pill.Position = UDim2.new(1, -46, 0.5, -10)
-    pill.BackgroundColor3 = default and COLORS.accent2 or COLORS.off
-    pill.Parent = row
-    corner(pill, 10)
+    local chevron = label(headerBtn, defaultOpen and "▾" or "▸", 13, COLORS.accent, Enum.Font.GothamBold)
+    chevron.Size = UDim2.fromOffset(24, 32)
+    chevron.Position = UDim2.new(1, -28, 0, 0)
+    chevron.TextXAlignment = Enum.TextXAlignment.Center
+    chevron.ZIndex = 4
 
-    local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(14, 14)
-    knob.Position = default and UDim2.fromOffset(20, 3) or UDim2.fromOffset(2, 3)
-    knob.BackgroundColor3 = Color3.new(1, 1, 1)
-    knob.BorderSizePixel = 0
-    knob.Parent = pill
-    corner(knob, 7)
+    local container = Instance.new("Frame")
+    container.Name = "Items"
+    container.BackgroundTransparency = 1
+    container.Size = UDim2.new(1, 0, 0, 0)
+    container.AutomaticSize = Enum.AutomaticSize.Y
+    container.Visible = defaultOpen
+    container.LayoutOrder = nextOrder()
+    container.ZIndex = 2
+    container.Parent = wrap
 
-    local on = default
-    connect(pill.MouseButton1Click, function()
-        on = not on
-        TweenService:Create(pill, TweenInfo.new(0.15), { BackgroundColor3 = on and COLORS.accent2 or COLORS.off }):Play()
-        TweenService:Create(knob, TweenInfo.new(0.15, Enum.EasingStyle.Back), { Position = on and UDim2.fromOffset(20, 3) or UDim2.fromOffset(2, 3) }):Play()
-        callback(on)
+    local cl = Instance.new("UIListLayout")
+    cl.Padding = UDim.new(0, 4)
+    cl.SortOrder = Enum.SortOrder.LayoutOrder
+    cl.Parent = container
+
+    connect(headerBtn.Activated, function()
+        container.Visible = not container.Visible
+        chevron.Text = container.Visible and "▾" or "▸"
     end)
+
+    return container
 end
 
-local function makeToggle(text, default, callback)
+-- ========= Тумблер (большой) =========
+local function makeToggle(text, default, callback, parent)
+    parent = parent or content
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -4, 0, 42)
+    row.Size = UDim2.new(1, 0, 0, 38)
     row.BackgroundColor3 = COLORS.item
-    row.BackgroundTransparency = 0.1
+    row.BackgroundTransparency = 0.15
     row.BorderSizePixel = 0
     row.LayoutOrder = nextOrder()
-    row.Parent = content
-    corner(row, 10)
+    row.ZIndex = 3
+    row.Parent = parent
+    corner(row, 0)
     stroke(row, COLORS.accent2, 0.85, 0.8)
 
-    local l = label(row, text, 14)
+    local l = label(row, text, 13)
     l.Position = UDim2.fromOffset(12, 0)
     l.Size = UDim2.new(1, -70, 1, 0)
+    l.ZIndex = 4
 
-    local pill = Instance.new("TextButton")
-    pill.Text = ""
-    pill.AutoButtonColor = false
-    pill.Size = UDim2.fromOffset(44, 24)
-    pill.Position = UDim2.new(1, -56, 0.5, -12)
+    local pill = makeBtn(row)
+    pill.Size = UDim2.fromOffset(42, 22)
+    pill.Position = UDim2.new(1, -54, 0.5, -11)
     pill.BackgroundColor3 = default and COLORS.accent2 or COLORS.off
-    pill.Parent = row
-    corner(pill, 12)
+    pill.ZIndex = 4
+    corner(pill, 0)
     local pg = Instance.new("UIGradient")
     pg.Color = GRADIENT
     pg.Enabled = default
     pg.Parent = pill
-    stroke(pill, Color3.new(1, 1, 1), default and 0.7 or 0.9, 1)
 
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(18, 18)
+    knob.Size = UDim2.fromOffset(16, 16)
     knob.Position = default and UDim2.fromOffset(23, 3) or UDim2.fromOffset(3, 3)
     knob.BackgroundColor3 = Color3.new(1, 1, 1)
     knob.BorderSizePixel = 0
+    knob.ZIndex = 5
     knob.Parent = pill
-    corner(knob, 9)
+    corner(knob, 0)
 
     local on = default
-    connect(pill.MouseButton1Click, function()
+    connect(pill.Activated, function()
         on = not on
-        TweenService:Create(pill, TweenInfo.new(0.18, Enum.EasingStyle.Quint), { BackgroundColor3 = on and COLORS.accent2 or COLORS.off }):Play()
+        TweenService:Create(pill, TweenInfo.new(0.15, Enum.EasingStyle.Quint), { BackgroundColor3 = on and COLORS.accent2 or COLORS.off }):Play()
         pg.Enabled = on
-        TweenService:Create(knob, TweenInfo.new(0.18, Enum.EasingStyle.Back), { Position = on and UDim2.fromOffset(24, 3) or UDim2.fromOffset(2, 3) }):Play()
+        TweenService:Create(knob, TweenInfo.new(0.15, Enum.EasingStyle.Quint), { Position = on and UDim2.fromOffset(23, 3) or UDim2.fromOffset(3, 3) }):Play()
         callback(on)
     end)
 end
 
-local function makeSpeedSlider(text, min, max, default, callback)
+-- ========= Тумблер (компактный, для списка сущностей) =========
+local function makeSmallToggle(text, default, callback, parent)
+    parent = parent or content
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -4, 0, 78)
+    row.Size = UDim2.new(1, 0, 0, 28)
     row.BackgroundColor3 = COLORS.item
-    row.BackgroundTransparency = 0.1
+    row.BackgroundTransparency = 0.3
     row.BorderSizePixel = 0
     row.LayoutOrder = nextOrder()
-    row.Parent = content
-    corner(row, 10)
+    row.ZIndex = 3
+    row.Parent = parent
+    corner(row, 0)
+
+    local l = label(row, text, 12)
+    l.Position = UDim2.fromOffset(10, 0)
+    l.Size = UDim2.new(1, -56, 1, 0)
+    l.ZIndex = 4
+
+    local pill = makeBtn(row)
+    pill.Size = UDim2.fromOffset(34, 18)
+    pill.Position = UDim2.new(1, -44, 0.5, -9)
+    pill.BackgroundColor3 = default and COLORS.accent2 or COLORS.off
+    pill.ZIndex = 4
+    corner(pill, 0)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.fromOffset(12, 12)
+    knob.Position = default and UDim2.fromOffset(19, 3) or UDim2.fromOffset(3, 3)
+    knob.BackgroundColor3 = Color3.new(1, 1, 1)
+    knob.BorderSizePixel = 0
+    knob.ZIndex = 5
+    knob.Parent = pill
+    corner(knob, 0)
+
+    local on = default
+    connect(pill.Activated, function()
+        on = not on
+        TweenService:Create(pill, TweenInfo.new(0.13), { BackgroundColor3 = on and COLORS.accent2 or COLORS.off }):Play()
+        TweenService:Create(knob, TweenInfo.new(0.13, Enum.EasingStyle.Quint), { Position = on and UDim2.fromOffset(19, 3) or UDim2.fromOffset(3, 3) }):Play()
+        callback(on)
+    end)
+end
+
+-- ========= Слайдер скорости =========
+local function makeSpeedSlider(text, min, max, default, callback, parent)
+    parent = parent or content
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 74)
+    row.BackgroundColor3 = COLORS.item
+    row.BackgroundTransparency = 0.15
+    row.BorderSizePixel = 0
+    row.LayoutOrder = nextOrder()
+    row.ZIndex = 3
+    row.Parent = parent
+    corner(row, 0)
     stroke(row, COLORS.accent2, 0.85, 0.8)
 
-    local l = label(row, text, 14)
-    l.Position = UDim2.fromOffset(12, 10)
-    l.Size = UDim2.new(1, -140, 0, 24)
+    local l = label(row, text, 13)
+    l.Position = UDim2.fromOffset(12, 8)
+    l.Size = UDim2.new(1, -140, 0, 22)
+    l.ZIndex = 4
 
-    local minus = smallButton(row, "−")
-    minus.Size = UDim2.fromOffset(26, 26)
-    minus.Position = UDim2.new(1, -128, 0, 8)
+    local minus = makeBtn(row)
+    minus.Size = UDim2.fromOffset(24, 24)
+    minus.Position = UDim2.new(1, -124, 0, 8)
+    minus.Text = "−"
+    minus.TextSize = 16
+    minus.Font = Enum.Font.GothamBold
+    minus.TextColor3 = COLORS.text
+    minus.BackgroundColor3 = COLORS.off
+    minus.ZIndex = 4
+    corner(minus, 0)
+    hoverFx(minus, COLORS.off, COLORS.itemHover)
 
-    local box = smallBox(row, tostring(default))
-    box.Size = UDim2.fromOffset(52, 26)
-    box.Position = UDim2.new(1, -98, 0, 8)
+    local box = Instance.new("TextBox")
+    box.Text = tostring(default)
+    box.TextSize = 13
+    box.Font = Enum.Font.GothamBold
+    box.TextColor3 = COLORS.accent
+    box.PlaceholderColor3 = COLORS.sub
+    box.BackgroundColor3 = COLORS.bg
+    box.BackgroundTransparency = 0.2
+    box.ClearTextOnFocus = false
+    box.Size = UDim2.fromOffset(48, 24)
+    box.Position = UDim2.new(1, -96, 0, 8)
+    box.ZIndex = 4
+    box.Parent = row
+    corner(box, 0)
+    stroke(box, COLORS.accent2, 0.7, 1)
 
-    local plus = smallButton(row, "+")
-    plus.Size = UDim2.fromOffset(26, 26)
-    plus.Position = UDim2.new(1, -38, 0, 8)
+    local plus = makeBtn(row)
+    plus.Size = UDim2.fromOffset(24, 24)
+    plus.Position = UDim2.new(1, -40, 0, 8)
+    plus.Text = "+"
+    plus.TextSize = 16
+    plus.Font = Enum.Font.GothamBold
+    plus.TextColor3 = COLORS.text
+    plus.BackgroundColor3 = COLORS.off
+    plus.ZIndex = 4
+    corner(plus, 0)
+    hoverFx(plus, COLORS.off, COLORS.itemHover)
 
-    local track = Instance.new("TextButton")
-    track.Text = ""
-    track.AutoButtonColor = false
+    local track = makeBtn(row)
     track.Size = UDim2.new(1, -24, 0, 10)
-    track.Position = UDim2.new(0, 12, 0, 54)
+    track.Position = UDim2.new(0, 12, 0, 52)
     track.BackgroundColor3 = COLORS.off
-    track.BackgroundTransparency = 0.15
-    track.Parent = row
-    corner(track, 5)
+    track.BackgroundTransparency = 0.1
+    track.ZIndex = 4
+    corner(track, 0)
 
     local fill = Instance.new("Frame")
     fill.BackgroundColor3 = COLORS.accent2
     fill.BorderSizePixel = 0
+    fill.ZIndex = 4
     fill.Parent = track
-    corner(fill, 5)
+    corner(fill, 0)
     local fg = Instance.new("UIGradient")
     fg.Color = GRADIENT
     fg.Parent = fill
 
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(16, 16)
+    knob.Size = UDim2.fromOffset(14, 14)
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
     knob.BackgroundColor3 = Color3.new(1, 1, 1)
     knob.BorderSizePixel = 0
-    knob.ZIndex = 2
+    knob.ZIndex = 6
     knob.Parent = track
-    corner(knob, 8)
+    corner(knob, 0)
     stroke(knob, COLORS.accent, 0.2, 1.5)
 
     local value = default
@@ -552,7 +593,7 @@ local function makeSpeedSlider(text, min, max, default, callback)
         v = math.clamp(math.floor(v + 0.5), min, max)
         value = v
         local a = (v - min) / (max - min)
-        TweenService:Create(fill, TweenInfo.new(0.1), { Size = UDim2.new(a, 0, 1, 0) }):Play()
+        TweenService:Create(fill, TweenInfo.new(0.08), { Size = UDim2.new(a, 0, 1, 0) }):Play()
         knob.Position = UDim2.new(a, 0, 0.5, 0)
         box.Text = tostring(v)
         callback(v)
@@ -580,8 +621,8 @@ local function makeSpeedSlider(text, min, max, default, callback)
             dragging = false
         end
     end)
-    connect(minus.MouseButton1Click, function() setValue(value - 1) end)
-    connect(plus.MouseButton1Click, function() setValue(value + 1) end)
+    connect(minus.Activated, function() setValue(value - 1) end)
+    connect(plus.Activated, function() setValue(value + 1) end)
     connect(box.FocusLost, function()
         local n = tonumber(box.Text)
         if n then setValue(n) else box.Text = tostring(value) end
@@ -592,57 +633,76 @@ end
 local collapsed = false
 local function setCollapsed(v)
     collapsed = v
-    TweenService:Create(main, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+    TweenService:Create(main, TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
         Size = v and COLLAPSED_SIZE or FULL_SIZE
     }):Play()
-    task.delay(0.12, function()
+    task.delay(0.1, function()
         content.Visible = not v
     end)
-    collapseBtn.Text = v and "▢" or "—"
+    collapseBtn.Text = v and "▸" or "▾"
 end
 
-connect(collapseBtn.MouseButton1Click, function()
+connect(collapseBtn.Activated, function()
     setCollapsed(not collapsed)
 end)
 
--- ========= Уведомления =========
-local toastHolder = Instance.new("Frame")
-toastHolder.AnchorPoint = Vector2.new(0.5, 0)
-toastHolder.Position = UDim2.new(0.5, 0, 0, 20)
-toastHolder.Size = UDim2.fromOffset(340, 40)
-toastHolder.BackgroundTransparency = 1
-toastHolder.Parent = gui
+-- ========= Уведомления (чистые карточки, без следов) =========
+local notifHolder = Instance.new("Frame")
+notifHolder.Name = "Notifications"
+notifHolder.AnchorPoint = Vector2.new(0.5, 0)
+notifHolder.Position = UDim2.new(0.5, 0, 0, 14)
+notifHolder.Size = UDim2.fromOffset(320, 0)
+notifHolder.AutomaticSize = Enum.AutomaticSize.Y
+notifHolder.BackgroundTransparency = 1
+notifHolder.Parent = gui
 
-local toast = label(toastHolder, "", 15, COLORS.text, Enum.Font.GothamBold)
-toast.Size = UDim2.fromScale(1, 1)
-toast.TextXAlignment = Enum.TextXAlignment.Center
-toast.BackgroundColor3 = COLORS.bg
-toast.BackgroundTransparency = 1
-toast.TextTransparency = 1
-corner(toast, 12)
-stroke(toast, COLORS.accent, 0.4, 1.2)
+local notifLayout = Instance.new("UIListLayout")
+notifLayout.Padding = UDim.new(0, 6)
+notifLayout.SortOrder = Enum.SortOrder.LayoutOrder
+notifLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+notifLayout.Parent = notifHolder
 
-local toastIcon = label(toastHolder, "⚠", 16, Color3.fromRGB(255, 200, 100), Enum.Font.GothamBold)
-toastIcon.Size = UDim2.fromOffset(30, 40)
-toastIcon.Position = UDim2.fromOffset(8, 0)
-toastIcon.TextTransparency = 1
-
-local toastId = 0
+local notifOrder = 0
 local function notify(text)
     if not State.notifyOn then return end
-    toastId += 1
-    local id = toastId
-    toast.Text = "   " .. text
-    toastHolder.Position = UDim2.new(0.5, 0, 0, 12)
-    TweenService:Create(toastHolder, TweenInfo.new(0.25, Enum.EasingStyle.Back), { Position = UDim2.new(0.5, 0, 0, 20) }):Play()
-    toast.BackgroundTransparency = 0.1
-    toast.TextTransparency = 0
-    toastIcon.TextTransparency = 0
-    task.delay(3, function()
-        if id == toastId then
-            TweenService:Create(toast, TweenInfo.new(0.4), { BackgroundTransparency = 1, TextTransparency = 1 }):Play()
-            TweenService:Create(toastIcon, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
-        end
+    notifOrder += 1
+
+    local card = Instance.new("Frame")
+    card.Size = UDim2.fromOffset(300, 34)
+    card.BackgroundColor3 = COLORS.bar
+    card.BackgroundTransparency = 1
+    card.BorderSizePixel = 0
+    card.LayoutOrder = notifOrder
+    card.Parent = notifHolder
+    corner(card, 0)
+    local cs = stroke(card, COLORS.accent2, 0.35, 1)
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.fromOffset(3, 34)
+    bar.BackgroundColor3 = COLORS.accent
+    bar.BorderSizePixel = 0
+    bar.Parent = card
+    local bg2 = Instance.new("UIGradient")
+    bg2.Color = GRADIENT
+    bg2.Parent = bar
+
+    local txt = label(card, text, 13, COLORS.text, Enum.Font.GothamBold)
+    txt.Position = UDim2.fromOffset(14, 0)
+    txt.Size = UDim2.new(1, -20, 1, 0)
+    txt.TextTransparency = 1
+
+    TweenService:Create(card, TweenInfo.new(0.18), { BackgroundTransparency = 0.04 }):Play()
+    TweenService:Create(txt, TweenInfo.new(0.18), { TextTransparency = 0 }):Play()
+
+    task.delay(2.6, function()
+        if not card.Parent then return end
+        local t1 = TweenService:Create(card, TweenInfo.new(0.3), { BackgroundTransparency = 1 })
+        local t2 = TweenService:Create(txt, TweenInfo.new(0.3), { TextTransparency = 1 })
+        t1:Play()
+        t2:Play()
+        t1.Completed:Connect(function()
+            card:Destroy()
+        end)
     end)
 end
 
@@ -678,7 +738,6 @@ local function removeEsp(model)
     end
 end
 
--- Этаж помечается ЦИФРОЙ в табличке: [1] Rush [12m], [ST] Creak [30m]
 local function addEsp(model, displayName, floorId, notifySpawn)
     if tracked[model] then return end
     tracked[model] = { objects = {}, name = displayName }
@@ -758,7 +817,6 @@ task.spawn(function()
 end)
 connect(workspace.DescendantAdded, check)
 
--- Дистанция и видимость
 task.spawn(function()
     while gui.Parent do
         local char = lp.Character
@@ -777,86 +835,85 @@ task.spawn(function()
     end
 end)
 
--- ========= Меню =========
-header("ИГРОК")
+-- ========= Меню: разделы со всеми функциями =========
+local playerSec = makeSection("ИГРОК", true)
 makeToggle("Изменение скорости", false, function(v)
     State.speedOn = v
-end)
+end, playerSec)
 makeSpeedSlider("Скорость", MIN_SPEED, MAX_SPEED, State.speed, function(v)
     State.speed = v
-end)
+end, playerSec)
 
-header("СУЩНОСТИ")
-makeToggle("ESP сущностей", true, function(v) State.espOn = v end)
-makeToggle("Авто-обнаружение новых", true, function(v) State.autoOn = v end)
-makeToggle("Уведомления о спавне", true, function(v) State.notifyOn = v end)
+local espSec = makeSection("СУЩНОСТИ", true)
+makeToggle("ESP сущностей", true, function(v) State.espOn = v end, espSec)
+makeToggle("Авто-обнаружение новых", true, function(v) State.autoOn = v end, espSec)
+makeToggle("Уведомления о спавне", true, function(v) State.notifyOn = v end, espSec)
 
 for _, f in ipairs(FLOORS) do
-    header(f.title)
-    for _, name in ipairs(floorEntities[f.id]) do
-        makeSmallToggle(name, true, function(v)
-            State.entityVisible[name] = v
-            if not v then
-                -- убрать ESP у уже отслеживаемых экземпляров этой сущности
-                for m, t in pairs(tracked) do
-                    if t.name == name then removeEsp(m) end
-                end
-            else
-                -- вернуть ESP, если сущность уже существует в мире
-                for modelName, e in pairs(ENTITIES) do
-                    if e[1] == name then
-                        for _, d in ipairs(workspace:GetDescendants()) do
-                            if d:IsA("Model") and d.Name == modelName then check(d) end
+    if #floorEntities[f.id] > 0 then
+        local sec = makeSection(f.title, false)
+        for _, name in ipairs(floorEntities[f.id]) do
+            makeSmallToggle(name, true, function(v)
+                State.entityVisible[name] = v
+                task.spawn(function()
+                    if not v then
+                        for m, t in pairs(tracked) do
+                            if t.name == name then removeEsp(m) end
+                        end
+                    else
+                        for modelName, e in pairs(ENTITIES) do
+                            if e[1] == name then
+                                for _, d in ipairs(workspace:GetDescendants()) do
+                                    if d:IsA("Model") and d.Name == modelName then check(d) end
+                                end
+                            end
                         end
                     end
-                end
-            end
-        end)
+                end)
+            end, sec)
+        end
     end
 end
 
-header("СВЯЗЬ")
+local linkSec = makeSection("СВЯЗЬ", false)
 do
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, -4, 0, 46)
+    row.Size = UDim2.new(1, 0, 0, 42)
     row.BackgroundColor3 = COLORS.item
-    row.BackgroundTransparency = 0.1
+    row.BackgroundTransparency = 0.15
     row.BorderSizePixel = 0
     row.LayoutOrder = nextOrder()
-    row.Parent = content
-    corner(row, 10)
+    row.ZIndex = 3
+    row.Parent = linkSec
+    corner(row, 0)
     stroke(row, COLORS.accent2, 0.85, 0.8)
 
-    local l = label(row, "ТГК разраба", 14)
-    l.Position = UDim2.fromOffset(12, 5)
-    l.Size = UDim2.new(1, -90, 0, 20)
+    local l = label(row, "ТГК разраба", 13)
+    l.Position = UDim2.fromOffset(12, 4)
+    l.Size = UDim2.new(1, -90, 0, 18)
+    l.ZIndex = 4
 
-    local link = label(row, "t.me/fiskgrov", 12, COLORS.accent3, Enum.Font.GothamBold)
-    link.Position = UDim2.fromOffset(12, 24)
-    link.Size = UDim2.new(1, -90, 0, 18)
+    local link = label(row, "t.me/fiskgrov", 11, COLORS.accent3, Enum.Font.GothamBold)
+    link.Position = UDim2.fromOffset(12, 22)
+    link.Size = UDim2.new(1, -90, 0, 16)
+    link.ZIndex = 4
 
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(72, 28)
-    btn.Position = UDim2.new(1, -82, 0.5, -14)
+    local btn = makeBtn(row)
+    btn.Size = UDim2.fromOffset(70, 26)
+    btn.Position = UDim2.new(1, -80, 0.5, -13)
     btn.BackgroundColor3 = COLORS.accent2
     btn.Text = "Перейти"
     btn.TextSize = 12
     btn.Font = Enum.Font.GothamBold
     btn.TextColor3 = COLORS.text
-    btn.AutoButtonColor = false
-    btn.Parent = row
-    corner(btn, 8)
+    btn.ZIndex = 4
+    corner(btn, 0)
     local bgrad = Instance.new("UIGradient")
     bgrad.Color = GRADIENT
     bgrad.Parent = btn
-    btn.MouseEnter:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = COLORS.accent }):Play()
-    end)
-    btn.MouseLeave:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = COLORS.accent2 }):Play()
-    end)
+    hoverFx(btn, COLORS.accent2, COLORS.accent)
 
-    connect(btn.MouseButton1Click, function()
+    connect(btn.Activated, function()
         local ok = pcall(function() setclipboard("https://t.me/fiskgrov") end)
         if ok then
             notify("Ссылка скопирована: t.me/fiskgrov")
@@ -870,27 +927,27 @@ local hint = label(content, "RightShift — скрыть / показать ме
 hint.Size = UDim2.new(1, 0, 0, 16)
 hint.TextXAlignment = Enum.TextXAlignment.Center
 hint.LayoutOrder = nextOrder()
+hint.ZIndex = 2
 
-
--- ========= Плавающая кнопка (для мобильных / Delta) =========
+-- ========= Плавающая кнопка (градиентный круг) =========
 local fab = Instance.new("TextButton")
 fab.Name = "Fab"
-fab.Size = UDim2.fromOffset(44, 44)
-fab.Position = UDim2.new(0, 16, 0.5, -22)
-fab.BackgroundColor3 = COLORS.bar
-fab.BackgroundTransparency = 0.1
+fab.Size = UDim2.fromOffset(48, 48)
+fab.Position = UDim2.new(0, 16, 0.5, -24)
+fab.BackgroundColor3 = COLORS.accent2
 fab.Text = "◈"
 fab.TextSize = 20
 fab.Font = Enum.Font.GothamBold
-fab.TextColor3 = COLORS.accent
+fab.TextColor3 = Color3.new(1, 1, 1)
+fab.AutoButtonColor = false
+fab.Active = true
 fab.BorderSizePixel = 0
 fab.ZIndex = 5
 fab.Parent = gui
-corner(fab, 22)
-stroke(fab, COLORS.accent2, 0.4, 1.2)
+corner(fab, 24)
+stroke(fab, COLORS.accent, 0.3, 1.5)
 local fabGrad = Instance.new("UIGradient")
 fabGrad.Color = GRADIENT
-fabGrad.Transparency = NumberSequence.new(0.8)
 fabGrad.Parent = fab
 
 do
@@ -928,7 +985,7 @@ connect(UIS.InputBegan, function(i, gpe)
     end
 end)
 
-connect(closeBtn.MouseButton1Click, function()
+connect(closeBtn.Activated, function()
     State.speedOn = false
     for m in pairs(tracked) do removeEsp(m) end
     for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
