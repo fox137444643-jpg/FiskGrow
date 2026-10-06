@@ -362,6 +362,7 @@ main.BackgroundColor3 = COLORS.bg
 main.BackgroundTransparency = 0.02
 main.BorderSizePixel = 0
 main.ClipsDescendants = true
+main.Active = true
 main.ZIndex = 1
 main.Parent = gui
 corner(main, 28)
@@ -374,6 +375,7 @@ top.Size = UDim2.new(1, 0, 0, TOP_H)
 top.BackgroundColor3 = COLORS.bg
 top.BackgroundTransparency = 1
 top.BorderSizePixel = 0
+top.Active = true
 top.ZIndex = 2
 top.Parent = main
 
@@ -468,6 +470,7 @@ body.Name = "Body"
 body.BackgroundTransparency = 1
 body.Position = UDim2.fromOffset(0, TOP_H)
 body.Size = UDim2.new(1, 0, 1, -TOP_H)
+body.Active = true
 body.ZIndex = 2
 body.Parent = main
 
@@ -478,6 +481,7 @@ sidebar.Name = "Sidebar"
 sidebar.BackgroundTransparency = 1
 sidebar.BorderSizePixel = 0
 sidebar.Size = UDim2.new(0, SIDE_W, 1, 0)
+sidebar.Active = true
 sidebar.ZIndex = 2
 sidebar.Parent = body
 
@@ -498,6 +502,7 @@ panel.BorderSizePixel = 0
 panel.Position = UDim2.fromOffset(SIDE_W, 0)
 panel.Size = UDim2.new(1, -(SIDE_W + 12), 1, -12)
 panel.ClipsDescendants = true
+panel.Active = true
 panel.ZIndex = 2
 panel.Parent = body
 corner(panel, 22)
