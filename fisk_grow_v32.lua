@@ -1255,8 +1255,7 @@ do
         w = hasAny(tn, GEN_WORDS)
         if w then return "gen", w end
 
-        w = hasAny(tn, CONT_WORDS)
-        if w then return "container", w end
+        -- сами тумбы, шкафы и сундуки не показываем, только предметы
 
         return nil
     end
@@ -1289,6 +1288,13 @@ do
 
         local cat, word = classify(prompt, target)
         if not cat or not State.pz[GROUP[cat]] then return end
+
+        -- предмет, лежащий прямо в тумбе/шкафу: подсвечиваем сам предмет, а не контейнер
+        if cat == "loot" and hasAny(target.Name:lower(), CONT_WORDS) then
+            local pp = prompt.Parent
+            if pp and pp:IsA("Attachment") then pp = pp.Parent end
+            if pp then target = pp end
+        end
 
         local part = target:IsA("BasePart") and target or getPart(target)
         if not part then return end
@@ -1415,7 +1421,7 @@ do
 
                 for prompt, e in pairs(tracked) do
                     local gone = not prompt.Parent or not e.part.Parent
-                    local used = (e.cat == "loot" or e.cat == "container") and not prompt.Enabled
+                    local used = false
                     if gone or used then
                         remove(prompt)
                     elseif root then
@@ -1610,7 +1616,7 @@ end, pages.pz)
 
 do
     local sec = makeSection("ЧТО ПОКАЗЫВАТЬ", true, pages.pz)
-    makeSmallToggle("Предметы (тумбы, шкафы, сундуки)", true, function(v)
+    makeSmallToggle("Предметы (только лежащие)", true, function(v)
         State.pz.loot = v
         PZ.refresh()
     end, sec)
