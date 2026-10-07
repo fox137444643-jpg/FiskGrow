@@ -534,6 +534,8 @@ local EN_STRINGS = {
     ["Перейти"] = "Copy",
     ["Ссылка скопирована: t.me/fiskgrov"] = "Link copied: t.me/fiskgrov",
     ["RightShift - скрыть / показать меню"] = "RightShift - hide / show menu",
+    ["Разрешить прыжок"] = "Allow jumping",
+    ["Разрешить слайд"] = "Allow sliding",
     ["Маршрут на Seek (стрелки)"] = "Seek chase route (arrows)",
     ["Предупреждение Screech (поворот)"] = "Screech warning (turn)",
     ["ПОВЕРНИСЬ НАЛЕВО"] = "TURN LEFT",
@@ -544,6 +546,7 @@ local EN_STRINGS = {
     ["Отсчёт прыжка на маршруте"] = "Jump countdown on route",
     ["Диагностика Seek (лог в буфер)"] = "Seek diagnostics (log to clipboard)",
     ["ПРЫГАЙ!"] = "JUMP!",
+    ["ПРЫГАЙ"] = "JUMP",
     ["ПРИСЯДЬ!"] = "CROUCH!",
     ["ПРИСЯДЬ"] = "CROUCH",
     ["Маршрут не найден"] = "Route not found",
@@ -1859,9 +1862,14 @@ do
         markers = {}
     end
 
+    local objMarks = {}    -- [объект] = { bb, tl }  (GUI, пересоздаётся)
+    local objState = {}    -- [объект] = { passed, gone }  (живёт до конца погони)
+
     function SK.clear()
         if folder then pcall(function() folder:ClearAllChildren() end) end
         killMarkers()
+        for _, m in pairs(objMarks) do pcall(function() m.bb:Destroy() end) end
+        objMarks = {}
         route = nil
     end
 
@@ -2031,6 +2039,159 @@ do
         return n
     end
 
+    -- ===== Реальные объекты погони Seek (имена: PathLights/SeekGuidingLight, DuckBoard, Bridge) =====
+    local pathLightFolders, duckBoards, gaps = {}, {}, {}
+    local function trackObjects(inst)
+        local n = inst.Name
+        if n == "PathLights" then
+            pathLightFolders[inst] = true
+            inst.AncestryChanged:Connect(function(_, parent)
+                if not parent then pathLightFolders[inst] = nil end
+            end)
+        elseif n == "DuckBoard" and inst:IsA("Model") then
+            duckBoards[inst] = true
+            inst.AncestryChanged:Connect(function(_, parent)
+                if not parent then duckBoards[inst] = nil end
+            end)
+        elseif n == "Bridge" and inst:IsA("Model") then
+            task.spawn(function()
+                for _, c in ipairs(inst:GetChildren()) do
+                    if c.Name == "PlayerBarrier" and c:IsA("BasePart") and c.Size.Y == 2.75
+                        and (c.Rotation.X == 0 or c.Rotation.X == 180) then
+                        gaps[#gaps + 1] = { pos = (c.CFrame * CFrame.new(0, 0, -5)).Position, bridge = inst }
+                    end
+                end
+            end)
+        end
+    end
+    task.spawn(function()
+        for _, d in ipairs(workspace:GetDescendants()) do trackObjects(d) end
+    end)
+    connect(workspace.DescendantAdded, trackObjects)
+
+    local function currentLights()
+        local out = {}
+        for f in pairs(pathLightFolders) do
+            for _, ch in ipairs(f:GetChildren()) do
+                if ch.Name == "SeekGuidingLight" and ch:IsA("BasePart") then out[#out + 1] = ch end
+            end
+        end
+        return out
+    end
+
+    local function floorBelow(pos, fallbackY)
+        local ignore = {}
+        if folder then table.insert(ignore, folder) end
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl.Character then table.insert(ignore, pl.Character) end
+        end
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = ignore
+        local hit = workspace:Raycast(pos, Vector3.new(0, -40, 0), params)
+        if hit then return hit.Position end
+        return Vector3.new(pos.X, fallbackY, pos.Z)
+    end
+
+    -- маршрут по настоящим огням Seek (точнее pathfinding); nil, если огней ещё нет
+    local function nativeWaypoints(root, goal)
+        local ls = currentLights()
+        if #ls < 3 then return nil, #ls end
+        -- порядок берём как у игры; если конец списка дальше от двери, чем начало - разворачиваем
+        if goal then
+            local first, last = ls[1].Position, ls[#ls].Position
+            if (first - goal).Magnitude < (last - goal).Magnitude then
+                local rev = {}
+                for i = #ls, 1, -1 do rev[#rev + 1] = ls[i] end
+                ls = rev
+            end
+        end
+        local bi, bd = 1, math.huge
+        for i, l in ipairs(ls) do
+            local d = (Vector3.new(l.Position.X, 0, l.Position.Z) - Vector3.new(root.Position.X, 0, root.Position.Z)).Magnitude
+            if d < bd then bi, bd = i, d end
+        end
+        local floorY = root.Position.Y - 3
+        local pts = { { Position = Vector3.new(root.Position.X, floorY, root.Position.Z) } }
+        for i = bi, #ls do
+            pts[#pts + 1] = { Position = floorBelow(ls[i].Position, floorY) }
+        end
+        if #pts < 3 then return nil, #ls end
+        return pts, #ls
+    end
+
+    local function makeObjMark(key, pos, kind)
+        ensureFolder()
+        local anchor = Instance.new("Part")
+        anchor.Anchored, anchor.CanCollide, anchor.CanQuery, anchor.CanTouch = true, false, false, false
+        anchor.Transparency = 1
+        anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+        anchor.CFrame = CFrame.new(pos + Vector3.new(0, 4, 0))
+        anchor.Parent = folder
+        local bb = Instance.new("BillboardGui")
+        bb.Adornee = anchor
+        bb.AlwaysOnTop = true
+        bb.Size = UDim2.fromOffset(180, 36)
+        bb.Parent = espFolder
+        local tl = Instance.new("TextLabel")
+        tl.BackgroundTransparency = 1
+        tl.Size = UDim2.fromScale(1, 1)
+        tl.Font = Enum.Font.GothamBold
+        tl.TextSize = 22
+        tl.TextColor3 = kind == "jump" and COLORS.text or COLORS.eggText
+        tl.TextStrokeColor3 = kind == "jump" and COLORS.danger or Color3.new(0, 0, 0)
+        tl.TextStrokeTransparency = 0.2
+        tl.Parent = bb
+        objMarks[key] = { bb = bb, tl = tl }
+        return objMarks[key]
+    end
+
+    local function updateObjMark(key, pos, kind, root, speed)
+        local st = objState[key]
+        if not st then st = { passed = false, gone = false } objState[key] = st end
+        if st.gone then return end
+        local dist = flat(pos - root.Position).Magnitude
+        local m = objMarks[key]
+        if dist > 90 then
+            if m then m.bb.Enabled = false end
+            return
+        end
+        if dist < 6 then st.passed = true end
+        if st.passed and dist > 10 then
+            st.gone = true
+            if m then pcall(function() m.bb:Destroy() end) objMarks[key] = nil end
+            return
+        end
+        if not m or not m.bb.Parent then m = makeObjMark(key, pos, kind) end
+        m.bb.Enabled = true
+        local t = dist / speed
+        if kind == "jump" then
+            m.tl.Text = (t <= 0.35) and T("ПРЫГАЙ!") or (T("ПРЫГАЙ") .. string.format(" %.1f", t))
+        else
+            m.tl.Text = (t <= 0.5 or dist < 6) and T("ПРИСЯДЬ!") or (T("ПРИСЯДЬ") .. string.format(" %.1f", t))
+        end
+    end
+
+    local function updateObjMarks(root)
+        local speed = math.max(flat(root.AssemblyLinearVelocity).Magnitude, 12)
+        if State.seekCrouch then
+            for board in pairs(duckBoards) do
+                local part = board.PrimaryPart or getPart(board)
+                if part then updateObjMark(board, part.Position, "crouch", root, speed) end
+            end
+        end
+        if State.seekJump then
+            for i = #gaps, 1, -1 do
+                local g = gaps[i]
+                if not g.bridge.Parent then
+                    table.remove(gaps, i)
+                else
+                    updateObjMark(g, g.pos, "jump", root, speed)
+                end
+            end
+        end
+    end
+
     local function makeMarker(pos, idx, endIdx, kind)
         local anchor = newPart(Vector3.new(0.2, 0.2, 0.2), CFrame.new(pos + Vector3.new(0, 4, 0)),
             kind == "jump" and JUMP_COLOR or CROUCH_COLOR)
@@ -2054,7 +2215,7 @@ do
     end
 
     -- строим маршрут ОДИН раз и фиксируем в мире
-    local function build(door, goal, wps, partial)
+    local function build(door, goal, wps, partial, native)
         SK.clear()
         if not wps or #wps < 2 then
             -- пути нет: через стены НЕ рисуем, просто сообщаем (один раз на дверь)
@@ -2086,8 +2247,9 @@ do
             cum += (b - a).Magnitude
             if cum > MAX_LEN then break end
             local list = {}
-            local isJump = pts[i + 1].jump
-            local isLow = State.seekCrouch and (ceilingHeight(a) < LOW_CEILING
+            -- по огням Seek подсказки берём от реальных объектов (DuckBoard/Bridge), а не от догадок
+            local isJump = (not native) and pts[i + 1].jump
+            local isLow = (not native) and State.seekCrouch and (ceilingHeight(a) < LOW_CEILING
                 or ceilingHeight(a:Lerp(b, 0.5)) < LOW_CEILING)
 
             if isLow then
@@ -2122,7 +2284,7 @@ do
             parts[lastDrawn][#parts[lastDrawn] + 1] = fin
         end
 
-        route = { pts = pts, parts = parts, goal = goal, door = door, progress = 1, hidden = 0 }
+        route = { pts = pts, parts = parts, goal = goal, door = door, progress = 1, hidden = 0, native = native }
         if jumpIdx then makeMarker(pts[jumpIdx].pos, jumpIdx, jumpIdx, "jump") end
         if crouchStart then
             makeMarker(pts[crouchStart].pos, crouchStart, crouchEnd or crouchStart, "crouch")
@@ -2187,7 +2349,10 @@ do
                     end
                     local doorChanged = route and route.door ~= door
                     local needRetry = (not route) and (failDoor ~= door or os.clock() - lastCompute > 4)
-                    if (doorChanged or offRoute or needRetry)
+                    local nLights = #currentLights()
+                    local lightsChanged = route and ((route.native and route.native ~= nLights)
+                        or (not route.native and nLights >= 3))
+                    if (doorChanged or offRoute or needRetry or lightsChanged)
                         and not computing and os.clock() - lastCompute > 1.5 then
                         lastCompute = os.clock()
                         computing = true
@@ -2195,6 +2360,12 @@ do
                         task.spawn(function()
                             local goals = doorGoals(door, startPos)
                             local use, useGoal, usePartial
+                            local nw, nCount = nativeWaypoints(root, goals and goals[1])
+                            if nw then
+                                if State.routeOn then build(door, goals and goals[1] or Vector3.zero, nw, false, nCount) end
+                                computing = false
+                                return
+                            end
                             if goals then
                                 local w1, g1, p1 = attempt(startPos, goals, STAND_H)
                                 local w2, g2, p2
@@ -2227,10 +2398,14 @@ do
     end)
 
     connect(RunService.Heartbeat, function()
-        if #markers > 0 then
-            local char = lp.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if root then pcall(updateCountdown, root) end
+        local char = lp.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        if #markers > 0 then pcall(updateCountdown, root) end
+        if State.routeOn and SK.chaseActive() then
+            pcall(updateObjMarks, root)
+        elseif next(objState) then
+            objState = {}
         end
     end)
 end
@@ -2406,6 +2581,39 @@ makeToggle(T("Изменение скорости"), false, function(v)
 end, pages.player)
 makeSpeedSlider(T("Скорость"), MIN_SPEED, MAX_SPEED, State.speed, function(v)
     State.speed = v
+end, pages.player)
+
+-- Разрешить прыжок / слайд (атрибуты персонажа CanJump / CanSlide, локально)
+State.allowJump, State.allowSlide = false, false
+local origAttr = {}
+local function applyMoveAttrs()
+    local char = lp.Character
+    if not char then return end
+    for _, a in ipairs({ { "CanJump", State.allowJump }, { "CanSlide", State.allowSlide } }) do
+        local name, on = a[1], a[2]
+        if on then
+            if origAttr[name] == nil then origAttr[name] = char:GetAttribute(name) or false end
+            if char:GetAttribute(name) ~= true then char:SetAttribute(name, true) end
+        elseif origAttr[name] ~= nil then
+            char:SetAttribute(name, origAttr[name])
+            origAttr[name] = nil
+        end
+    end
+end
+task.spawn(function()
+    while gui.Parent do
+        pcall(applyMoveAttrs)
+        task.wait(0.5)
+    end
+end)
+connect(lp.CharacterAdded, function() origAttr = {} end)
+makeToggle(T("Разрешить прыжок"), false, function(v)
+    State.allowJump = v
+    pcall(applyMoveAttrs)
+end, pages.player)
+makeToggle(T("Разрешить слайд"), false, function(v)
+    State.allowSlide = v
+    pcall(applyMoveAttrs)
 end, pages.player)
 
 -- ESP
