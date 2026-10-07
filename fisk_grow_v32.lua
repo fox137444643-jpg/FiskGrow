@@ -36,8 +36,8 @@ local COLLAPSED_SIZE = UDim2.fromOffset(580, 52)
 
 -- ========= Этажи и сущности =========
 local FLOORS = {
-    { id = "1",  title = "ЭТАЖ 1 · ОТЕЛЬ" },
-    { id = "2",  title = "ЭТАЖ 2 · ШАХТЫ" },
+    { id = "1",  title = "ЭТАЖ 1 - ОТЕЛЬ" },
+    { id = "2",  title = "ЭТАЖ 2 - ШАХТЫ" },
     { id = "BD", title = "BACKDOOR" },
     { id = "AR", title = "АРХИВЫ" },
     { id = "ST", title = "ЛЕСТНИЦЫ" },
@@ -138,7 +138,7 @@ local function connect(signal, fn)
 end
 
 -- ========= Логотип (фото встроено в скрипт) =========
--- Если хочешь свой rbxassetid — вставь сюда, например "rbxassetid://123456789"
+-- Если хочешь свой rbxassetid - вставь сюда, например "rbxassetid://123456789"
 local LOGO_ASSET_ID = ""
 local LOGO_B64 = [==[
 /9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAQDAwMDAgQDAwMEBAQFBgoGBgUFBgwICQcKDgwPDg4MDQ0PERYTDxAVEQ0NExoTFRcYGRkZDxIbHRsYHRYYGRj/
@@ -275,7 +275,7 @@ end
 
 local logoImage = getLogoImage()
 
--- ========= Палитра (Material You · чёрно-белая) =========
+-- ========= Палитра (Material You - чёрно-белая) =========
 local COLORS = {
     bg        = Color3.fromRGB(17, 17, 18),    -- surface
     bar       = Color3.fromRGB(26, 26, 28),    -- surface container low
@@ -352,6 +352,285 @@ local function hoverFx(b, from, to)
     end)
 end
 
+-- ========= Иконки (рисуются фигурами, шрифты не нужны) =========
+local function iconBar(parent, w, h, x, y, rot, color)
+    local f = Instance.new("Frame")
+    f.AnchorPoint = Vector2.new(0.5, 0.5)
+    f.Size = UDim2.fromOffset(w, h)
+    f.Position = UDim2.fromOffset(x, y)
+    f.Rotation = rot or 0
+    f.BackgroundColor3 = color
+    f.BorderSizePixel = 0
+    f.ZIndex = 6
+    f.Parent = parent
+    corner(f, math.min(w, h) / 2)
+    return f
+end
+
+local function iconRing(parent, w, h, x, y, th, color, r)
+    local f = Instance.new("Frame")
+    f.AnchorPoint = Vector2.new(0.5, 0.5)
+    f.Size = UDim2.fromOffset(w, h)
+    f.Position = UDim2.fromOffset(x, y)
+    f.BackgroundTransparency = 1
+    f.BorderSizePixel = 0
+    f.ZIndex = 6
+    f.Parent = parent
+    corner(f, r)
+    local s = Instance.new("UIStroke")
+    s.Color = color
+    s.Thickness = th
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    s.Parent = f
+    return f
+end
+
+-- kind: close, chevdown, chevright, plus, minus, player, esp, ent, pz, link
+local function makeIcon(parent, kind, color, size)
+    local c = Instance.new("Frame")
+    c.AnchorPoint = Vector2.new(0.5, 0.5)
+    c.Size = UDim2.fromOffset(20, 20)
+    c.BackgroundTransparency = 1
+    c.BorderSizePixel = 0
+    c.ZIndex = 6
+    c.Parent = parent
+    local sc = Instance.new("UIScale")
+    sc.Scale = (size or 20) / 20
+    sc.Parent = c
+
+    if kind == "close" then
+        iconBar(c, 16, 2.4, 10, 10, 45, color)
+        iconBar(c, 16, 2.4, 10, 10, -45, color)
+    elseif kind == "chevdown" then
+        iconBar(c, 10, 2.4, 6.5, 9.5, 45, color)
+        iconBar(c, 10, 2.4, 13.5, 9.5, -45, color)
+    elseif kind == "chevright" then
+        iconBar(c, 10, 2.4, 10.5, 6.5, 45, color)
+        iconBar(c, 10, 2.4, 10.5, 13.5, -45, color)
+    elseif kind == "plus" then
+        iconBar(c, 12, 2.4, 10, 10, 0, color)
+        iconBar(c, 2.4, 12, 10, 10, 0, color)
+    elseif kind == "minus" then
+        iconBar(c, 12, 2.4, 10, 10, 0, color)
+    elseif kind == "player" then
+        iconBar(c, 7, 7, 10, 6, 0, color)
+        iconBar(c, 14, 8, 10, 15, 0, color)
+    elseif kind == "esp" then
+        iconRing(c, 18, 11, 10, 10, 2, color, 6)
+        iconBar(c, 5, 5, 10, 10, 0, color)
+    elseif kind == "ent" then
+        for i = 0, 2 do
+            local y = 4.5 + i * 5.5
+            iconBar(c, 3, 3, 3.5, y, 0, color)
+            iconBar(c, 11, 2.2, 13, y, 0, color)
+        end
+    elseif kind == "pz" then
+        iconRing(c, 11, 11, 8.5, 8.5, 2, color, 6)
+        iconBar(c, 8, 2.6, 15.5, 15.5, 45, color)
+    elseif kind == "link" then
+        iconRing(c, 18, 13, 10, 9, 2, color, 5)
+        iconBar(c, 9, 2, 10, 7, 0, color)
+        iconBar(c, 6, 2, 8.5, 11, 0, color)
+    end
+    return c
+end
+
+local function setIconColor(icon, color)
+    for _, d in ipairs(icon:GetDescendants()) do
+        if d:IsA("UIStroke") then
+            d.Color = color
+        elseif d:IsA("Frame") and d.BackgroundTransparency < 1 then
+            d.BackgroundColor3 = color
+        end
+    end
+end
+
+-- ========= Язык: выбор при первом запуске, дальше запоминается =========
+local LANG_FILE = "fiskgrow_lang.txt"
+local LANG = nil
+pcall(function()
+    if isfile and readfile and isfile(LANG_FILE) then
+        local v = readfile(LANG_FILE)
+        if v == "ru" or v == "en" then LANG = v end
+    end
+end)
+
+local EN_STRINGS = {
+    ["ИГРОК"] = "PLAYER",
+    ["СУЩНОСТИ"] = "ENTITIES",
+    ["ГОЛОВОЛОМКИ"] = "PUZZLES",
+    ["СВЯЗЬ"] = "CONTACT",
+    ["ДВЕРЬ "] = "DOOR ",
+    [" появился!"] = " spawned!",
+    ["ДВЕРЬ %d [%dm]"] = "DOOR %d [%dm]",
+    ["Ключ"] = "Key",
+    ["Скелетный ключ"] = "Skeleton Key",
+    ["Зажигалка"] = "Lighter",
+    ["Отмычки"] = "Lockpicks",
+    ["Витамины"] = "Vitamins",
+    ["Фонарик"] = "Flashlight",
+    ["Батарейка"] = "Battery",
+    ["Бинт"] = "Bandage",
+    ["Свеча"] = "Candle",
+    ["Распятие"] = "Crucifix",
+    ["Смузи"] = "Smoothie",
+    ["Компас"] = "Compass",
+    ["Ножницы"] = "Shears",
+    ["Золото"] = "Gold",
+    ["Светящиеся палочки"] = "Glowsticks",
+    ["Святая граната"] = "Holy Grenade",
+    ["Путеводный свет"] = "Guiding Light",
+    ["Налобный фонарь"] = "Strap Light",
+    ["Лампа"] = "Lamp",
+    ["Аптечка"] = "First Aid",
+    ["Отмычка"] = "Lockpick",
+    ["КНИГА-ПОДСКАЗКА"] = "HINT BOOK",
+    ["ПОДСКАЗКА"] = "HINT",
+    ["ЗАМОК"] = "PADLOCK",
+    ["РЫЧАГ"] = "LEVER",
+    ["ПЕРЕКЛЮЧАТЕЛЬ"] = "SWITCH",
+    ["КНОПКА"] = "BUTTON",
+    ["ПЕЧЬ - СЖЕЧЬ"] = "FURNACE - BURN",
+    ["СЖЕЧЬ"] = "BURN",
+    ["КАМИН"] = "FIREPLACE",
+    ["ГЕНЕРАТОР"] = "GENERATOR",
+    ["ЛАМПОЧКА"] = "BULB",
+    ["ПРЕДОХРАНИТЕЛЬ"] = "FUSE",
+    ["ВЕНТИЛЬ"] = "VALVE",
+    ["РУБИЛЬНИК"] = "BREAKER",
+    ["КАБЕЛЬ"] = "CABLE",
+    ["ПРОВОД"] = "WIRE",
+    ["ШЕСТЕРНЯ"] = "GEAR",
+    ["КОЛЕСО"] = "WHEEL",
+    ["ТРУБА"] = "PIPE",
+    ["ТУМБА"] = "DRAWER",
+    ["СУНДУК"] = "CHEST",
+    ["КОМОД"] = "DRESSER",
+    ["ТУМБОЧКА"] = "NIGHTSTAND",
+    ["ЯЩИК"] = "BOX",
+    ["ПОЛКА"] = "SHELF",
+    ["ШКАФ"] = "CABINET",
+    ["ШКАФЧИК"] = "LOCKER",
+    ["ЯЩИК С ИНСТР."] = "TOOLBOX",
+    ["ЗАМОК: "] = "PADLOCK: ",
+    ["Код библиотеки: "] = "Library code: ",
+    ["нет бумаги-подсказки"] = "no hint paper",
+    ["Изменение скорости"] = "Speed change",
+    ["Скорость"] = "Speed",
+    ["ESP сущностей"] = "Entity ESP",
+    ["Подсветка нужной двери"] = "Highlight next door",
+    ["Авто-обнаружение новых"] = "Auto-detect new ones",
+    ["Уведомления о спавне"] = "Spawn notifications",
+    ["Предметы и головоломки"] = "Items & puzzles",
+    ["ЧТО ПОКАЗЫВАТЬ"] = "WHAT TO SHOW",
+    ["Предметы (только лежащие)"] = "Items (loose only)",
+    ["Библиотека: книги, замок, код"] = "Library: books, padlock, code",
+    ["Шахты: генераторы и лампочки"] = "Mines: generators & bulbs",
+    ["Рычаги и огонь (лестницы)"] = "Levers & fire (stairs)",
+    ["Код библиотеки"] = "Library code",
+    ["ТГК разраба"] = "Dev's Telegram",
+    ["Перейти"] = "Copy",
+    ["Ссылка скопирована: t.me/fiskgrov"] = "Link copied: t.me/fiskgrov",
+    ["RightShift - скрыть / показать меню"] = "RightShift - hide / show menu",
+    ["Язык интерфейса"] = "Interface language",
+    ["Сменить"] = "Change",
+    ["Язык будет выбран при следующем запуске"] = "Language will be asked on next launch",
+    ["ЭТАЖ 1 - ОТЕЛЬ"] = "FLOOR 1 - HOTEL",
+    ["ЭТАЖ 2 - ШАХТЫ"] = "FLOOR 2 - MINES",
+    ["АРХИВЫ"] = "ARCHIVES",
+    ["ЛЕСТНИЦЫ"] = "STAIRS",
+    ["Яйцо Gloombat"] = "Gloombat egg",
+}
+
+local function T(str)
+    if LANG == "en" then return EN_STRINGS[str] or str end
+    return str
+end
+
+if not LANG then
+    local overlay = Instance.new("Frame")
+    overlay.Name = "LanguagePicker"
+    overlay.Size = UDim2.fromScale(1, 1)
+    overlay.BackgroundColor3 = Color3.new(0, 0, 0)
+    overlay.BackgroundTransparency = 0.45
+    overlay.BorderSizePixel = 0
+    overlay.Active = true
+    overlay.ZIndex = 50
+    overlay.Parent = gui
+
+    local card = Instance.new("Frame")
+    card.AnchorPoint = Vector2.new(0.5, 0.5)
+    card.Position = UDim2.fromScale(0.5, 0.5)
+    card.Size = UDim2.fromOffset(340, 260)
+    card.BackgroundColor3 = COLORS.bg
+    card.BorderSizePixel = 0
+    card.Active = true
+    card.ZIndex = 51
+    card.Parent = overlay
+    corner(card, 28)
+    stroke(card, COLORS.outline, 0.65, 1)
+
+    local pl = Instance.new("ImageLabel")
+    pl.AnchorPoint = Vector2.new(0.5, 0)
+    pl.Position = UDim2.new(0.5, 0, 0, 22)
+    pl.Size = UDim2.fromOffset(64, 64)
+    pl.BackgroundColor3 = COLORS.item
+    pl.BorderSizePixel = 0
+    pl.Image = logoImage or ""
+    pl.ScaleType = Enum.ScaleType.Crop
+    pl.ZIndex = 52
+    pl.Parent = card
+    corner(pl, 32)
+    stroke(pl, COLORS.accent, 0.55, 1.5)
+    if not logoImage then
+        local f = label(pl, "F", 28, COLORS.accent, Enum.Font.GothamBold)
+        f.Size = UDim2.fromScale(1, 1)
+        f.TextXAlignment = Enum.TextXAlignment.Center
+        f.ZIndex = 53
+    end
+
+    local t1 = label(card, "Fisk Grow", 20, COLORS.text, Enum.Font.GothamBold)
+    t1.Position = UDim2.fromOffset(0, 94)
+    t1.Size = UDim2.new(1, 0, 0, 26)
+    t1.TextXAlignment = Enum.TextXAlignment.Center
+    t1.ZIndex = 52
+
+    local t2 = label(card, "Выберите язык / Choose language", 13, COLORS.sub, Enum.Font.GothamMedium)
+    t2.Position = UDim2.fromOffset(0, 122)
+    t2.Size = UDim2.new(1, 0, 0, 20)
+    t2.TextXAlignment = Enum.TextXAlignment.Center
+    t2.ZIndex = 52
+
+    local chosen = false
+    local function option(text, x, code, filled)
+        local b = makeBtn(card)
+        b.Size = UDim2.fromOffset(144, 50)
+        b.Position = UDim2.fromOffset(x, 170)
+        b.BackgroundColor3 = filled and COLORS.accent or COLORS.highest
+        b.Text = text
+        b.TextSize = 15
+        b.Font = Enum.Font.GothamBold
+        b.TextColor3 = filled and COLORS.onAccent or COLORS.text
+        b.ZIndex = 52
+        corner(b, 25)
+        hoverFx(b, filled and COLORS.accent or COLORS.highest, filled and COLORS.accent3 or COLORS.selected)
+        b.Activated:Connect(function()
+            if chosen then return end
+            chosen = true
+            LANG = code
+            pcall(function() if writefile then writefile(LANG_FILE, code) end end)
+            overlay:Destroy()
+        end)
+    end
+    option("Русский", 20, "ru", true)
+    option("English", 176, "en", false)
+
+    while not chosen and gui.Parent do
+        task.wait(0.05)
+    end
+    if not LANG then LANG = "ru" end
+end
+
 -- ========= Главное окно =========
 local TOP_H = 52
 
@@ -394,7 +673,7 @@ logo.Parent = top
 corner(logo, 19)
 stroke(logo, COLORS.accent, 0.55, 1.5)
 if not logoImage then
-    local logoIcon = label(logo, "◈", 18, COLORS.accent, Enum.Font.GothamBold)
+    local logoIcon = label(logo, "F", 20, COLORS.accent, Enum.Font.GothamBold)
     logoIcon.Size = UDim2.fromScale(1, 1)
     logoIcon.TextXAlignment = Enum.TextXAlignment.Center
     logoIcon.ZIndex = 4
@@ -423,7 +702,7 @@ local collapseBtn = makeBtn(top)
 collapseBtn.Size = UDim2.fromOffset(34, 34)
 collapseBtn.Position = UDim2.new(1, -86, 0.5, -17)
 collapseBtn.BackgroundColor3 = COLORS.item
-collapseBtn.Text = "▾"
+collapseBtn.Text = ""
 collapseBtn.TextSize = 15
 collapseBtn.Font = Enum.Font.GothamBold
 collapseBtn.TextColor3 = COLORS.text
@@ -431,18 +710,30 @@ collapseBtn.ZIndex = 3
 corner(collapseBtn, 17)
 hoverFx(collapseBtn, COLORS.item, COLORS.highest)
 
+local collapseIcon
+local function setCollapseIcon(kind)
+    if collapseIcon then collapseIcon:Destroy() end
+    collapseIcon = makeIcon(collapseBtn, kind, COLORS.text, 16)
+    collapseIcon.Position = UDim2.fromScale(0.5, 0.5)
+end
+setCollapseIcon("chevdown")
+
 -- Кнопка закрытия (белая filled)
 local closeBtn = makeBtn(top)
 closeBtn.Size = UDim2.fromOffset(34, 34)
 closeBtn.Position = UDim2.new(1, -46, 0.5, -17)
 closeBtn.BackgroundColor3 = COLORS.accent
-closeBtn.Text = "✕"
+closeBtn.Text = ""
 closeBtn.TextSize = 14
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextColor3 = COLORS.onAccent
 closeBtn.ZIndex = 3
 corner(closeBtn, 17)
 hoverFx(closeBtn, COLORS.accent, COLORS.accent3)
+do
+    local ci = makeIcon(closeBtn, "close", COLORS.onAccent, 15)
+    ci.Position = UDim2.fromScale(0.5, 0.5)
+end
 
 -- Перетаскивание за заголовок
 do
@@ -515,7 +806,7 @@ local function selectTab(id)
     for k, t in pairs(tabs) do
         local on = (k == id)
         TweenService:Create(t.btn, TweenInfo.new(0.15), { BackgroundTransparency = on and 0 or 1 }):Play()
-        t.ic.TextColor3 = on and COLORS.accent or COLORS.sub
+        setIconColor(t.ic, on and COLORS.accent or COLORS.sub)
         t.lbl.TextColor3 = on and COLORS.accent or COLORS.sub
     end
 end
@@ -531,11 +822,8 @@ local function makeTab(id, text, icon)
     btn.ZIndex = 3
     corner(btn, 21)
 
-    local ic = label(btn, icon, 15, COLORS.sub, Enum.Font.GothamBold)
-    ic.Position = UDim2.fromOffset(14, 0)
-    ic.Size = UDim2.fromOffset(20, 42)
-    ic.TextXAlignment = Enum.TextXAlignment.Center
-    ic.ZIndex = 4
+    local ic = makeIcon(btn, icon, COLORS.sub, 18)
+    ic.Position = UDim2.fromOffset(25, 21)
 
     local lbl = label(btn, text, 12, COLORS.sub, Enum.Font.GothamBold)
     lbl.Position = UDim2.fromOffset(42, 0)
@@ -573,11 +861,11 @@ local function makePage(id)
     return p
 end
 
-makeTab("player", "ИГРОК", "◆")
-makeTab("esp", "ESP", "◉")
-makeTab("ent", "СУЩНОСТИ", "☰")
-makeTab("pz", "ГОЛОВОЛОМКИ", "✦")
-makeTab("link", "СВЯЗЬ", "✉")
+makeTab("player", T("ИГРОК"), "player")
+makeTab("esp", "ESP", "esp")
+makeTab("ent", T("СУЩНОСТИ"), "ent")
+makeTab("pz", T("ГОЛОВОЛОМКИ"), "pz")
+makeTab("link", T("СВЯЗЬ"), "link")
 
 makePage("player")
 makePage("esp")
@@ -617,11 +905,13 @@ local function makeSection(titleText, defaultOpen, parent)
     ttl.Size = UDim2.new(1, -48, 1, 0)
     ttl.ZIndex = 4
 
-    local chevron = label(headerBtn, defaultOpen and "▾" or "▸", 14, COLORS.accent, Enum.Font.GothamBold)
-    chevron.Size = UDim2.fromOffset(24, 38)
-    chevron.Position = UDim2.new(1, -34, 0, 0)
-    chevron.TextXAlignment = Enum.TextXAlignment.Center
-    chevron.ZIndex = 4
+    local chevron
+    local function drawChevron(open)
+        if chevron then chevron:Destroy() end
+        chevron = makeIcon(headerBtn, open and "chevdown" or "chevright", COLORS.accent, 16)
+        chevron.Position = UDim2.new(1, -24, 0.5, 0)
+    end
+    drawChevron(defaultOpen)
 
     local container = Instance.new("Frame")
     container.Name = "Items"
@@ -640,7 +930,7 @@ local function makeSection(titleText, defaultOpen, parent)
 
     connect(headerBtn.Activated, function()
         container.Visible = not container.Visible
-        chevron.Text = container.Visible and "▾" or "▸"
+        drawChevron(container.Visible)
     end)
 
     return container
@@ -750,7 +1040,7 @@ local function makeSpeedSlider(text, min, max, default, callback, parent)
     local minus = makeBtn(row)
     minus.Size = UDim2.fromOffset(28, 28)
     minus.Position = UDim2.new(1, -146, 0, 10)
-    minus.Text = "−"
+    minus.Text = ""
     minus.TextSize = 16
     minus.Font = Enum.Font.GothamBold
     minus.TextColor3 = COLORS.text
@@ -758,6 +1048,10 @@ local function makeSpeedSlider(text, min, max, default, callback, parent)
     minus.ZIndex = 4
     corner(minus, 14)
     hoverFx(minus, COLORS.highest, COLORS.selected)
+    do
+        local mi = makeIcon(minus, "minus", COLORS.text, 14)
+        mi.Position = UDim2.fromScale(0.5, 0.5)
+    end
 
     local box = Instance.new("TextBox")
     box.Text = tostring(default)
@@ -777,7 +1071,7 @@ local function makeSpeedSlider(text, min, max, default, callback, parent)
     local plus = makeBtn(row)
     plus.Size = UDim2.fromOffset(28, 28)
     plus.Position = UDim2.new(1, -52, 0, 10)
-    plus.Text = "+"
+    plus.Text = ""
     plus.TextSize = 16
     plus.Font = Enum.Font.GothamBold
     plus.TextColor3 = COLORS.text
@@ -785,6 +1079,10 @@ local function makeSpeedSlider(text, min, max, default, callback, parent)
     plus.ZIndex = 4
     corner(plus, 14)
     hoverFx(plus, COLORS.highest, COLORS.selected)
+    do
+        local pi = makeIcon(plus, "plus", COLORS.text, 14)
+        pi.Position = UDim2.fromScale(0.5, 0.5)
+    end
 
     -- большая невидимая зона нажатия + тонкая дорожка
     local hit = makeBtn(row)
@@ -871,7 +1169,7 @@ local function setCollapsed(v)
     task.delay(0.1, function()
         body.Visible = not v
     end)
-    collapseBtn.Text = v and "▸" or "▾"
+    setCollapseIcon(v and "chevright" or "chevdown")
 end
 
 connect(collapseBtn.Activated, function()
@@ -1011,7 +1309,7 @@ local function updateDoor()
     tl.TextSize = 14
     tl.TextColor3 = COLORS.doorText
     tl.TextStrokeTransparency = 0.3
-    tl.Text = "ДВЕРЬ " .. tostring((tonumber(num) or 0) + 1)
+    tl.Text = T("ДВЕРЬ ") .. tostring((tonumber(num) or 0) + 1)
     tl.Parent = bb
 
     doorState = { door = door, hl = hl, bb = bb, tl = tl, part = part, num = (tonumber(num) or 0) + 1 }
@@ -1029,7 +1327,7 @@ end
 local function addEsp(model, displayName, floorId, notifySpawn, style)
     if tracked[model] then return end
     tracked[model] = { objects = {}, name = displayName }
-    if notifySpawn and live and State.notifyOn then notify(displayName .. " появился!") end
+    if notifySpawn and live and State.notifyOn then notify(T(displayName) .. T(" появился!")) end
 
     task.spawn(function()
         local part
@@ -1064,7 +1362,7 @@ local function addEsp(model, displayName, floorId, notifySpawn, style)
         tl.TextSize = 14
         tl.TextColor3 = style and style.text or (floorId == "?" and COLORS.espUnk or COLORS.espText)
         tl.TextStrokeTransparency = 0.3
-        tl.Text = displayName
+        tl.Text = T(displayName)
         tl.Parent = bb
 
         local t = tracked[model]
@@ -1115,13 +1413,13 @@ local function check(inst)
     end
     if not isModel then return end
 
-    -- детали внутри уже найденной сущности (Screech и т.п.) — не отдельные ESP
+    -- детали внутри уже найденной сущности (Screech и т.п.) - не отдельные ESP
     if hasAncestor(inst, isEntityModel) then return end
 
     local n = inst.Name:lower()
     local inRooms = inst:FindFirstAncestor("CurrentRooms") ~= nil
 
-    -- глаза на стенах у Seek и прочий декор Seek внутри комнат — игнорируем
+    -- глаза на стенах у Seek и прочий декор Seek внутри комнат - игнорируем
     local isSeekMover = inst.Name == "SeekMoving" or inst.Name == "SeekMovingNewClone"
     if inRooms and not isSeekMover and (n:find("seek", 1, true) or n:find("eye", 1, true)) then
         return
@@ -1160,7 +1458,7 @@ task.spawn(function()
         pcall(updateDoor)
         if doorState and root and doorState.part and doorState.part.Parent then
             local dist = (doorState.part.Position - root.Position).Magnitude
-            doorState.tl.Text = string.format("ДВЕРЬ %d [%dm]", doorState.num, dist)
+            doorState.tl.Text = string.format(T("ДВЕРЬ %d [%dm]"), doorState.num, dist)
         end
         for _, t in pairs(tracked) do
             if t.hl then
@@ -1168,7 +1466,7 @@ task.spawn(function()
                 t.bb.Enabled = State.espOn
                 if root and t.part and t.part.Parent then
                     local dist = (t.part.Position - root.Position).Magnitude
-                    t.tl.Text = string.format("[%s] %s [%dm]", t.floor, t.name, dist)
+                    t.tl.Text = string.format("[%s] %s [%dm]", t.floor, T(t.name), dist)
                 end
             end
         end
@@ -1194,25 +1492,25 @@ do
     local GROUP = { loot = "loot", container = "loot", library = "library", gen = "gen", lever = "lever" }
 
     local ITEM_RU = {
-        key = "Ключ", skeletonkey = "Скелетный ключ", lighter = "Зажигалка", lockpicks = "Отмычки",
-        vitamins = "Витамины", flashlight = "Фонарик", battery = "Батарейка", bandage = "Бинт",
-        candle = "Свеча", crucifix = "Распятие", smoothie = "Смузи", compass = "Компас",
-        shears = "Ножницы", goldpile = "Золото", gold = "Золото", glowsticks = "Светящиеся палочки",
-        holygrenade = "Святая граната", guidinglight = "Путеводный свет", straplight = "Налобный фонарь",
-        bulklight = "Лампа", firstaid = "Аптечка", lockpick = "Отмычка",
+        key = T("Ключ"), skeletonkey = T("Скелетный ключ"), lighter = T("Зажигалка"), lockpicks = T("Отмычки"),
+        vitamins = T("Витамины"), flashlight = T("Фонарик"), battery = T("Батарейка"), bandage = T("Бинт"),
+        candle = T("Свеча"), crucifix = T("Распятие"), smoothie = T("Смузи"), compass = T("Компас"),
+        shears = T("Ножницы"), goldpile = T("Золото"), gold = T("Золото"), glowsticks = T("Светящиеся палочки"),
+        holygrenade = T("Святая граната"), guidinglight = T("Путеводный свет"), straplight = T("Налобный фонарь"),
+        bulklight = T("Лампа"), firstaid = T("Аптечка"), lockpick = T("Отмычка"),
     }
 
     local WORD_RU = {
-        livehintbook = "КНИГА-ПОДСКАЗКА", hintbook = "КНИГА-ПОДСКАЗКА", hintpaper = "ПОДСКАЗКА",
-        libraryhint = "ПОДСКАЗКА", padlock = "ЗАМОК",
-        lever = "РЫЧАГ", switch = "ПЕРЕКЛЮЧАТЕЛЬ", button = "КНОПКА", furnace = "ПЕЧЬ · СЖЕЧЬ",
-        incinerat = "ПЕЧЬ · СЖЕЧЬ", burn = "СЖЕЧЬ", fireplace = "КАМИН",
-        generator = "ГЕНЕРАТОР", lamp = "ЛАМПОЧКА", bulb = "ЛАМПОЧКА", fuse = "ПРЕДОХРАНИТЕЛЬ",
-        valve = "ВЕНТИЛЬ", breaker = "РУБИЛЬНИК", cable = "КАБЕЛЬ", wire = "ПРОВОД",
-        gear = "ШЕСТЕРНЯ", wheel = "КОЛЕСО", pipe = "ТРУБА",
-        drawer = "ТУМБА", chest = "СУНДУК", dresser = "КОМОД", nightstand = "ТУМБОЧКА",
-        toolbox = "ЯЩИК", shelf = "ПОЛКА", crate = "ЯЩИК", cabinet = "ШКАФ", cupboard = "ШКАФ",
-        locker = "ШКАФЧИК", toolshed = "ЯЩИК С ИНСТР.",
+        livehintbook = T("КНИГА-ПОДСКАЗКА"), hintbook = T("КНИГА-ПОДСКАЗКА"), hintpaper = T("ПОДСКАЗКА"),
+        libraryhint = T("ПОДСКАЗКА"), padlock = T("ЗАМОК"),
+        lever = T("РЫЧАГ"), switch = T("ПЕРЕКЛЮЧАТЕЛЬ"), button = T("КНОПКА"), furnace = T("ПЕЧЬ - СЖЕЧЬ"),
+        incinerat = T("ПЕЧЬ - СЖЕЧЬ"), burn = T("СЖЕЧЬ"), fireplace = T("КАМИН"),
+        generator = T("ГЕНЕРАТОР"), lamp = T("ЛАМПОЧКА"), bulb = T("ЛАМПОЧКА"), fuse = T("ПРЕДОХРАНИТЕЛЬ"),
+        valve = T("ВЕНТИЛЬ"), breaker = T("РУБИЛЬНИК"), cable = T("КАБЕЛЬ"), wire = T("ПРОВОД"),
+        gear = T("ШЕСТЕРНЯ"), wheel = T("КОЛЕСО"), pipe = T("ТРУБА"),
+        drawer = T("ТУМБА"), chest = T("СУНДУК"), dresser = T("КОМОД"), nightstand = T("ТУМБОЧКА"),
+        toolbox = T("ЯЩИК"), shelf = T("ПОЛКА"), crate = T("ЯЩИК"), cabinet = T("ШКАФ"), cupboard = T("ШКАФ"),
+        locker = T("ШКАФЧИК"), toolshed = T("ЯЩИК С ИНСТР."),
     }
 
     local LIB_WORDS   = { "livehintbook", "hintbook", "hintpaper", "libraryhint", "padlock" }
@@ -1298,7 +1596,7 @@ do
         if cat == "loot" then
             text = ITEM_RU[(raw:lower():gsub("%s+", ""))] or raw
         elseif word == "padlock" then
-            text = "ЗАМОК"
+            text = T("ЗАМОК")
         else
             text = (WORD_RU[word] or tostring(word):upper()) .. " (" .. raw .. ")"
         end
@@ -1439,14 +1737,14 @@ do
                     if ok and text then
                         if PZ.codeLabel then PZ.codeLabel.Text = text end
                         for _, e in pairs(tracked) do
-                            if e.word == "padlock" then e.text = "ЗАМОК: " .. text end
+                            if e.word == "padlock" then e.text = T("ЗАМОК: ") .. text end
                         end
                         if text ~= lastCode then
                             lastCode = text
-                            if known and known > 0 then notify("Код библиотеки: " .. text) end
+                            if known and known > 0 then notify(T("Код библиотеки: ") .. text) end
                         end
                     elseif PZ.codeLabel then
-                        PZ.codeLabel.Text = "нет бумаги-подсказки"
+                        PZ.codeLabel.Text = T("нет бумаги-подсказки")
                     end
                 end
             end
@@ -1457,43 +1755,43 @@ end
 
 -- ========= Меню: пункты слева, функции справа =========
 -- ИГРОК
-makeToggle("Изменение скорости", false, function(v)
+makeToggle(T("Изменение скорости"), false, function(v)
     State.speedOn = v
 end, pages.player)
-makeSpeedSlider("Скорость", MIN_SPEED, MAX_SPEED, State.speed, function(v)
+makeSpeedSlider(T("Скорость"), MIN_SPEED, MAX_SPEED, State.speed, function(v)
     State.speed = v
 end, pages.player)
 
 -- ESP
-makeToggle("ESP сущностей", true, function(v) State.espOn = v end, pages.esp)
-makeToggle("Подсветка нужной двери", true, function(v)
+makeToggle(T("ESP сущностей"), true, function(v) State.espOn = v end, pages.esp)
+makeToggle(T("Подсветка нужной двери"), true, function(v)
     State.doorOn = v
     if not v then clearDoor() end
 end, pages.esp)
-makeToggle("Авто-обнаружение новых", true, function(v) State.autoOn = v end, pages.esp)
-makeToggle("Уведомления о спавне", true, function(v) State.notifyOn = v end, pages.esp)
+makeToggle(T("Авто-обнаружение новых"), true, function(v) State.autoOn = v end, pages.esp)
+makeToggle(T("Уведомления о спавне"), true, function(v) State.notifyOn = v end, pages.esp)
 
 -- ГОЛОВОЛОМКИ (всё выключено по умолчанию)
-makeToggle("Предметы и головоломки", false, function(v)
+makeToggle(T("Предметы и головоломки"), false, function(v)
     State.pzOn = v
     if v then PZ.scanAll() else PZ.clearAll() end
 end, pages.pz)
 
 do
-    local sec = makeSection("ЧТО ПОКАЗЫВАТЬ", true, pages.pz)
-    makeSmallToggle("Предметы (только лежащие)", true, function(v)
+    local sec = makeSection(T("ЧТО ПОКАЗЫВАТЬ"), true, pages.pz)
+    makeSmallToggle(T("Предметы (только лежащие)"), true, function(v)
         State.pz.loot = v
         PZ.refresh()
     end, sec)
-    makeSmallToggle("Библиотека: книги, замок, код", true, function(v)
+    makeSmallToggle(T("Библиотека: книги, замок, код"), true, function(v)
         State.pz.library = v
         PZ.refresh()
     end, sec)
-    makeSmallToggle("Шахты: генераторы и лампочки", true, function(v)
+    makeSmallToggle(T("Шахты: генераторы и лампочки"), true, function(v)
         State.pz.gen = v
         PZ.refresh()
     end, sec)
-    makeSmallToggle("Рычаги и огонь (лестницы)", true, function(v)
+    makeSmallToggle(T("Рычаги и огонь (лестницы)"), true, function(v)
         State.pz.lever = v
         PZ.refresh()
     end, sec)
@@ -1507,12 +1805,12 @@ do
     row.Parent = pages.pz
     corner(row, 16)
 
-    local cap = label(row, "Код библиотеки", 12, COLORS.sub, Enum.Font.GothamMedium)
+    local cap = label(row, T("Код библиотеки"), 12, COLORS.sub, Enum.Font.GothamMedium)
     cap.Position = UDim2.fromOffset(16, 8)
     cap.Size = UDim2.new(1, -32, 0, 16)
     cap.ZIndex = 4
 
-    local val = label(row, "—", 18, COLORS.accent, Enum.Font.GothamBold)
+    local val = label(row, "-", 18, COLORS.accent, Enum.Font.GothamBold)
     val.Position = UDim2.fromOffset(16, 26)
     val.Size = UDim2.new(1, -32, 0, 24)
     val.ZIndex = 4
@@ -1522,9 +1820,9 @@ end
 -- СУЩНОСТИ (по этажам)
 for _, f in ipairs(FLOORS) do
     if #floorEntities[f.id] > 0 then
-        local sec = makeSection(f.title, f.id == "1", pages.ent)
+        local sec = makeSection(T(f.title), f.id == "1", pages.ent)
         for _, name in ipairs(floorEntities[f.id]) do
-            makeSmallToggle(name, State.entityVisible[name], function(v)
+            makeSmallToggle(T(name), State.entityVisible[name], function(v)
                 State.entityVisible[name] = v
                 task.spawn(function()
                     if not v then
@@ -1553,7 +1851,7 @@ do
     row.Parent = pages.link
     corner(row, 16)
 
-    local l = label(row, "ТГК разраба", 14)
+    local l = label(row, T("ТГК разраба"), 14)
     l.Position = UDim2.fromOffset(16, 9)
     l.Size = UDim2.new(1, -120, 0, 20)
     l.ZIndex = 4
@@ -1567,7 +1865,7 @@ do
     btn.Size = UDim2.fromOffset(86, 36)
     btn.Position = UDim2.new(1, -100, 0.5, -18)
     btn.BackgroundColor3 = COLORS.accent
-    btn.Text = "Перейти"
+    btn.Text = T("Перейти")
     btn.TextSize = 12
     btn.Font = Enum.Font.GothamBold
     btn.TextColor3 = COLORS.onAccent
@@ -1578,14 +1876,55 @@ do
     connect(btn.Activated, function()
         local ok = pcall(function() setclipboard("https://t.me/fiskgrov") end)
         if ok then
-            notify("Ссылка скопирована: t.me/fiskgrov")
+            notify(T("Ссылка скопирована: t.me/fiskgrov"))
         else
             notify("t.me/fiskgrov")
         end
     end)
 end
 
-local hint = label(pages.link, "RightShift — скрыть / показать меню", 11, COLORS.sub)
+do
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 52)
+    row.BackgroundColor3 = COLORS.item
+    row.BorderSizePixel = 0
+    row.LayoutOrder = nextOrder()
+    row.ZIndex = 3
+    row.Parent = pages.link
+    corner(row, 16)
+
+    local l = label(row, T("Язык интерфейса"), 14)
+    l.Position = UDim2.fromOffset(16, 0)
+    l.Size = UDim2.new(1, -130, 1, 0)
+    l.ZIndex = 4
+
+    local btn = makeBtn(row)
+    btn.Size = UDim2.fromOffset(96, 34)
+    btn.Position = UDim2.new(1, -110, 0.5, -17)
+    btn.BackgroundColor3 = COLORS.highest
+    btn.Text = T("Сменить")
+    btn.TextSize = 12
+    btn.Font = Enum.Font.GothamBold
+    btn.TextColor3 = COLORS.text
+    btn.ZIndex = 4
+    corner(btn, 17)
+    hoverFx(btn, COLORS.highest, COLORS.selected)
+
+    connect(btn.Activated, function()
+        pcall(function()
+            if delfile and isfile and isfile(LANG_FILE) then
+                delfile(LANG_FILE)
+            elseif writefile then
+                writefile(LANG_FILE, "")
+            end
+        end)
+        notify(T("Язык будет выбран при следующем запуске"))
+    end)
+end
+
+local hint = label(pages.link, T("RightShift - скрыть / показать меню"), 11, COLORS.sub)
+hint.LayoutOrder = nextOrder()
+hint.Size = UDim2.new(1, 0, 0, 22)
 hint.Size = UDim2.new(1, 0, 0, 16)
 hint.TextXAlignment = Enum.TextXAlignment.Center
 hint.LayoutOrder = nextOrder()
@@ -1599,7 +1938,7 @@ fab.Name = "Fab"
 fab.Size = UDim2.fromOffset(56, 56)
 fab.Position = UDim2.new(0, 16, 0.5, -28)
 fab.BackgroundColor3 = COLORS.item
-fab.Text = logoImage and "" or "◈"
+fab.Text = logoImage and "" or "F"
 fab.TextSize = 22
 fab.Font = Enum.Font.GothamBold
 fab.TextColor3 = COLORS.accent
