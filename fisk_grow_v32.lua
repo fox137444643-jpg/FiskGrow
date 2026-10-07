@@ -534,7 +534,13 @@ local EN_STRINGS = {
     ["Перейти"] = "Copy",
     ["Ссылка скопирована: t.me/fiskgrov"] = "Link copied: t.me/fiskgrov",
     ["RightShift - скрыть / показать меню"] = "RightShift - hide / show menu",
-    ["Маршрут к двери (стрелки)"] = "Route to door (arrows)",
+    ["Маршрут на Seek (стрелки)"] = "Seek chase route (arrows)",
+    ["Предупреждение Screech (поворот)"] = "Screech warning (turn)",
+    ["ПОВЕРНИСЬ НАЛЕВО"] = "TURN LEFT",
+    ["ПОВЕРНИСЬ НАПРАВО"] = "TURN RIGHT",
+    ["ПОВЕРНИСЬ НАЗАД"] = "TURN AROUND",
+    ["СМОТРИ НА НЕГО"] = "LOOK AT IT",
+    ["СКРИПУН"] = "SCREECH",
     ["Отсчёт прыжка на маршруте"] = "Jump countdown on route",
     ["Диагностика Seek (лог в буфер)"] = "Seek diagnostics (log to clipboard)",
     ["ПРЫГАЙ!"] = "JUMP!",
@@ -874,13 +880,11 @@ end
 
 makeTab("player", T("ИГРОК"), "player")
 makeTab("esp", "ESP", "esp")
-makeTab("ent", T("СУЩНОСТИ"), "ent")
 makeTab("pz", T("ГОЛОВОЛОМКИ"), "pz")
 makeTab("link", T("СВЯЗЬ"), "link")
 
 makePage("player")
 makePage("esp")
-makePage("ent")
 makePage("pz")
 makePage("link")
 
@@ -1792,7 +1796,7 @@ do
 end
 
 -- ========= Маршрут к двери: фиксированные стрелки (локально, только по кнопке) =========
-State.routeOn = false
+State.routeOn = true   -- разрешён; рисуется ТОЛЬКО пока идёт погоня Seek
 State.seekJump = true
 State.seekCrouch = true
 
@@ -1803,7 +1807,8 @@ do
     local ROUTE_COLOR = COLORS.door
     local JUMP_COLOR = COLORS.danger
     local CROUCH_COLOR = COLORS.egg
-    local ARROW_GAP = 8
+    local ARROW_GAP = 7
+    local ARROW_COLOR = COLORS.accent
     local MAX_LEN = 260
     local STAND_H, CROUCH_H = 5, 2.6   -- высота агента стоя / в приседе
     local LOW_CEILING = 5.2            -- ниже этого потолка стоя не пройти
@@ -1875,26 +1880,39 @@ do
         return p
     end
 
-    local function segment(a, b, thick, color)
-        if (b - a).Magnitude < 0.05 then return nil end
-        return newPart(Vector3.new(thick, 0.16, (b - a).Magnitude), CFrame.lookAt((a + b) / 2, b), color)
-    end
-
     local function flat(v)
         return Vector3.new(v.X, 0, v.Z)
     end
 
-    -- стрелка на полу, возвращает список частей
-    local function drawArrow(pos, dir, color)
+    local STRIP_W = 1.5
+    local STRIP_UP = Vector3.new(0, 0.12, 0)
+
+    -- плоская полоса, как линия маршрута в навигаторе
+    local function ribbon(a, b, color)
+        local len = (b - a).Magnitude
+        if len < 0.05 then return nil end
+        return newPart(Vector3.new(STRIP_W, 0.12, len), CFrame.lookAt((a + b) / 2, b), color)
+    end
+
+    -- круглый стык, чтобы повороты были плавными
+    local function disc(pos, diameter, color)
+        local p = newPart(Vector3.new(0.12, diameter, diameter),
+            CFrame.new(pos) * CFrame.Angles(0, 0, math.pi / 2), color)
+        p.Shape = Enum.PartType.Cylinder
+        return p
+    end
+
+    -- аккуратная стрелка-шеврон поверх полосы
+    local function chevron(pos, dir, color)
         local right = dir:Cross(Vector3.yAxis)
-        local base = pos + Vector3.new(0, 0.3, 0)
-        local apex = base + dir * 1.4
+        local apex = pos + Vector3.new(0, 0.26, 0) + dir * 0.8
         local out = {}
-        for _, p in ipairs({
-            segment(base - dir * 1.2, apex, 0.4, color),
-            segment(apex, apex - dir * 1.2 + right * 1.1, 0.4, color),
-            segment(apex, apex - dir * 1.2 - right * 1.1, 0.4, color),
-        }) do out[#out + 1] = p end
+        for _, side in ipairs({ 1, -1 }) do
+            local tip = apex - dir * 0.9 + right * (0.85 * side)
+            local part = newPart(Vector3.new(0.34, 0.08, (apex - tip).Magnitude + 0.08),
+                CFrame.lookAt((apex + tip) / 2, tip), color)
+            out[#out + 1] = part
+        end
         return out
     end
 
@@ -2059,10 +2077,10 @@ do
             pts[#pts + 1] = { pos = wp.Position, jump = (wp.Action == Enum.PathWaypointAction.Jump) }
         end
 
-        local up = Vector3.new(0, 0.2, 0)
         local parts, cum, lastArrow = {}, 0, -ARROW_GAP
         local jumpIdx
         local crouchStart, crouchEnd, crouchClosed
+        local lastDrawn = 0
         for i = 1, #pts - 1 do
             local a, b = pts[i].pos, pts[i + 1].pos
             cum += (b - a).Magnitude
@@ -2080,21 +2098,28 @@ do
             end
 
             local color = isJump and JUMP_COLOR or (isLow and CROUCH_COLOR or ROUTE_COLOR)
-            local seg = segment(a + up, b + up, 0.32, color)
+            local seg = ribbon(a + STRIP_UP, b + STRIP_UP, color)
             if seg then list[#list + 1] = seg end
+            list[#list + 1] = disc(b + STRIP_UP, STRIP_W, color)
 
             local dir = flat(b - a)
             if dir.Magnitude > 0.1 then
                 dir = dir.Unit
                 if isJump and not jumpIdx and State.seekJump then
                     jumpIdx = i + 1
-                    for _, pp in ipairs(drawArrow(b, dir, JUMP_COLOR)) do list[#list + 1] = pp end
+                    for _, pp in ipairs(chevron(b, dir, ARROW_COLOR)) do list[#list + 1] = pp end
                 elseif cum - lastArrow >= ARROW_GAP then
                     lastArrow = cum
-                    for _, pp in ipairs(drawArrow(a:Lerp(b, 0.5), dir, color)) do list[#list + 1] = pp end
+                    for _, pp in ipairs(chevron(a:Lerp(b, 0.5), dir, ARROW_COLOR)) do list[#list + 1] = pp end
                 end
             end
             parts[i] = list
+            lastDrawn = i
+        end
+        -- кружок-финиш в конце маршрута
+        if lastDrawn > 0 and lastDrawn == #pts - 1 then
+            local fin = disc(pts[#pts].pos + STRIP_UP + Vector3.new(0, 0.02, 0), 3, ARROW_COLOR)
+            parts[lastDrawn][#parts[lastDrawn] + 1] = fin
         end
 
         route = { pts = pts, parts = parts, goal = goal, door = door, progress = 1, hidden = 0 }
@@ -2152,7 +2177,7 @@ do
         while gui.Parent do
             local char = lp.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
-            if State.routeOn and root then
+            if State.routeOn and root and SK.chaseActive() then
                 local door = getNextDoor()
                 if door then
                     local offRoute = false
@@ -2210,6 +2235,135 @@ do
     end)
 end
 
+-- ========= Предупреждение Screech: куда поворачиваться =========
+State.screechWarn = true
+do
+    local models = {}
+    local function trackScreech(inst)
+        if inst:IsA("Model") and inst.Name == "Screech" and not models[inst] then
+            models[inst] = true
+            inst.AncestryChanged:Connect(function(_, parent)
+                if not parent then models[inst] = nil end
+            end)
+        end
+    end
+    task.spawn(function()
+        for _, d in ipairs(workspace:GetDescendants()) do trackScreech(d) end
+    end)
+    connect(workspace.DescendantAdded, trackScreech)
+
+    -- индикатор: кольцо по центру экрана, указатель смотрит на Screech
+    local holder = Instance.new("Frame")
+    holder.Name = "ScreechWarn"
+    holder.AnchorPoint = Vector2.new(0.5, 0.5)
+    holder.Position = UDim2.fromScale(0.5, 0.42)
+    holder.Size = UDim2.fromOffset(240, 240)
+    holder.BackgroundTransparency = 1
+    holder.Visible = false
+    holder.ZIndex = 50
+    holder.Parent = gui
+
+    local ring = Instance.new("Frame")
+    ring.AnchorPoint = Vector2.new(0.5, 0.5)
+    ring.Position = UDim2.fromScale(0.5, 0.5)
+    ring.Size = UDim2.fromOffset(190, 190)
+    ring.BackgroundTransparency = 1
+    ring.ZIndex = 50
+    ring.Parent = holder
+    corner(ring, 95)
+    local ringStroke = stroke(ring, COLORS.outline, 0.6, 2)
+
+    local pointerBox = Instance.new("Frame")
+    pointerBox.AnchorPoint = Vector2.new(0.5, 0.5)
+    pointerBox.Position = UDim2.fromScale(0.5, 0.5)
+    pointerBox.Size = UDim2.fromOffset(190, 190)
+    pointerBox.BackgroundTransparency = 1
+    pointerBox.ZIndex = 51
+    pointerBox.Parent = holder
+
+    local pointer = Instance.new("Frame")
+    pointer.AnchorPoint = Vector2.new(0.5, 0.5)
+    pointer.Position = UDim2.fromScale(0.5, 0)
+    pointer.Size = UDim2.fromOffset(26, 26)
+    pointer.Rotation = 45
+    pointer.BackgroundColor3 = COLORS.danger
+    pointer.BorderSizePixel = 0
+    pointer.ZIndex = 52
+    pointer.Parent = pointerBox
+    corner(pointer, 6)
+
+    local card = Instance.new("Frame")
+    card.AnchorPoint = Vector2.new(0.5, 0.5)
+    card.Position = UDim2.fromScale(0.5, 0.5)
+    card.Size = UDim2.fromOffset(150, 52)
+    card.BackgroundColor3 = COLORS.bg
+    card.BackgroundTransparency = 0.08
+    card.BorderSizePixel = 0
+    card.ZIndex = 52
+    card.Parent = holder
+    corner(card, 14)
+    stroke(card, COLORS.outline, 0.55, 1)
+
+    local head = label(card, "", 11, COLORS.sub, Enum.Font.GothamMedium)
+    head.Position = UDim2.fromOffset(0, 6)
+    head.Size = UDim2.new(1, 0, 0, 14)
+    head.TextXAlignment = Enum.TextXAlignment.Center
+    head.ZIndex = 53
+    local msg = label(card, "", 13, COLORS.text, Enum.Font.GothamBold)
+    msg.Position = UDim2.fromOffset(0, 22)
+    msg.Size = UDim2.new(1, 0, 0, 22)
+    msg.TextXAlignment = Enum.TextXAlignment.Center
+    msg.ZIndex = 53
+
+    connect(RunService.RenderStepped, function()
+        local cam = workspace.CurrentCamera
+        local char = lp.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local target, best = nil, 80
+        if State.screechWarn and cam and root then
+            for m in pairs(models) do
+                local part = m.Parent and getPart(m)
+                if part then
+                    local d = (part.Position - root.Position).Magnitude
+                    if d < best then target, best = part, d end
+                end
+            end
+        end
+        if not target then
+            holder.Visible = false
+            return
+        end
+        holder.Visible = true
+
+        local look = cam.CFrame.LookVector
+        local to = target.Position - cam.CFrame.Position
+        local a1 = math.atan2(look.X, look.Z)
+        local a2 = math.atan2(to.X, to.Z)
+        -- угол от направления взгляда: >0 вправо, <0 влево
+        local diff = math.deg(a1 - a2)
+        diff = (diff + 180) % 360 - 180
+        pointerBox.Rotation = diff
+
+        local abs = math.abs(diff)
+        head.Text = T("СКРИПУН") .. string.format(" [%dm]", best)
+        if abs < 25 then
+            msg.Text = T("СМОТРИ НА НЕГО")
+            pointer.BackgroundColor3 = COLORS.door
+            ringStroke.Color = COLORS.door
+        else
+            pointer.BackgroundColor3 = COLORS.danger
+            ringStroke.Color = COLORS.danger
+            if abs > 135 then
+                msg.Text = T("ПОВЕРНИСЬ НАЗАД")
+            elseif diff > 0 then
+                msg.Text = T("ПОВЕРНИСЬ НАПРАВО")
+            else
+                msg.Text = T("ПОВЕРНИСЬ НАЛЕВО")
+            end
+        end
+    end)
+end
+
 -- ========= Диагностика Seek: что появляется в workspace во время погони =========
 State.seekDiag = false
 local DIAG = { lines = {}, seenKey = {}, conn = nil }
@@ -2262,7 +2416,7 @@ makeToggle(T("Подсветка нужной двери"), true, function(v)
 end, pages.esp)
 makeToggle(T("Авто-обнаружение новых"), true, function(v) State.autoOn = v end, pages.esp)
 makeToggle(T("Уведомления о спавне"), true, function(v) State.notifyOn = v end, pages.esp)
-makeToggle(T("Маршрут к двери (стрелки)"), false, function(v)
+makeToggle(T("Маршрут на Seek (стрелки)"), true, function(v)
     State.routeOn = v
     if not v then SK.clear() end
 end, pages.esp)
@@ -2274,6 +2428,7 @@ makeToggle(T("Подсказки приседания на маршруте"), t
     State.seekCrouch = v
     if State.routeOn then SK.clear() end
 end, pages.esp)
+makeToggle(T("Предупреждение Screech (поворот)"), true, function(v) State.screechWarn = v end, pages.esp)
 makeToggle(T("Диагностика Seek (лог в буфер)"), false, function(v)
     State.seekDiag = v
     if v then DIAG.start() else DIAG.stop() end
@@ -2323,29 +2478,6 @@ do
     val.Size = UDim2.new(1, -32, 0, 24)
     val.ZIndex = 4
     PZ.codeLabel = val
-end
-
--- СУЩНОСТИ (по этажам)
-for _, f in ipairs(FLOORS) do
-    if #floorEntities[f.id] > 0 then
-        local sec = makeSection(T(f.title), f.id == "1", pages.ent)
-        for _, name in ipairs(floorEntities[f.id]) do
-            makeSmallToggle(T(name), State.entityVisible[name], function(v)
-                State.entityVisible[name] = v
-                task.spawn(function()
-                    if not v then
-                        for m, t in pairs(tracked) do
-                            if t.name == name then removeEsp(m) end
-                        end
-                    else
-                        for _, d in ipairs(workspace:GetDescendants()) do
-                            check(d)
-                        end
-                    end
-                end)
-            end, sec)
-        end
-    end
 end
 
 -- СВЯЗЬ
