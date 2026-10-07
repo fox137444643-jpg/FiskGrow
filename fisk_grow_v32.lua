@@ -8,6 +8,8 @@
     - Floor 2: подсвечиваются яйца Gloombat там, где они лежат
     - Все кнопки работают через Activated (тап/мышь)
     - v3.6: оформление Material You (чёрно-белое), фото-лого рядом с названием
+    - v3.6: вкладка ГОЛОВОЛОМКИ (предметы, библиотека, генераторы, рычаги)
+    - v3.6: искусственный глитч (выход за карту и возврат) во вкладке ИГРОК
 ]]
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -474,7 +476,7 @@ body.Active = true
 body.ZIndex = 2
 body.Parent = main
 
-local SIDE_W = 148
+local SIDE_W = 156
 
 local sidebar = Instance.new("Frame")
 sidebar.Name = "Sidebar"
@@ -575,11 +577,13 @@ end
 makeTab("player", "ИГРОК", "◆")
 makeTab("esp", "ESP", "◉")
 makeTab("ent", "СУЩНОСТИ", "☰")
+makeTab("pz", "ГОЛОВОЛОМКИ", "✦")
 makeTab("link", "СВЯЗЬ", "✉")
 
 makePage("player")
 makePage("esp")
 makePage("ent")
+makePage("pz")
 makePage("link")
 
 local content = pages.player
@@ -1173,6 +1177,360 @@ task.spawn(function()
     end
 end)
 
+-- ========= ПРЕДМЕТЫ И ГОЛОВОЛОМКИ (отдельный пункт, по умолчанию ВЫКЛ) =========
+State.pzOn = false
+State.pz = { loot = true, library = true, gen = true, lever = true }
+
+local PZ = {}          -- публичные функции модуля (используются в меню)
+PZ.codeLabel = nil     -- сюда меню положит TextLabel с кодом библиотеки
+
+do
+    local COL = {
+        loot      = { Color3.fromRGB(96, 190, 255),  Color3.fromRGB(190, 232, 255) },
+        container = { Color3.fromRGB(80, 230, 190),  Color3.fromRGB(190, 255, 235) },
+        library   = { Color3.fromRGB(176, 140, 255), Color3.fromRGB(226, 210, 255) },
+        gen       = { Color3.fromRGB(255, 160, 50),  Color3.fromRGB(255, 224, 170) },
+        lever     = { Color3.fromRGB(255, 110, 190), Color3.fromRGB(255, 200, 232) },
+    }
+    local GROUP = { loot = "loot", container = "loot", library = "library", gen = "gen", lever = "lever" }
+
+    local ITEM_RU = {
+        key = "Ключ", skeletonkey = "Скелетный ключ", lighter = "Зажигалка", lockpicks = "Отмычки",
+        vitamins = "Витамины", flashlight = "Фонарик", battery = "Батарейка", bandage = "Бинт",
+        candle = "Свеча", crucifix = "Распятие", smoothie = "Смузи", compass = "Компас",
+        shears = "Ножницы", goldpile = "Золото", gold = "Золото", glowsticks = "Светящиеся палочки",
+        holygrenade = "Святая граната", guidinglight = "Путеводный свет", straplight = "Налобный фонарь",
+        bulklight = "Лампа", firstaid = "Аптечка", lockpick = "Отмычка",
+    }
+
+    local WORD_RU = {
+        livehintbook = "КНИГА-ПОДСКАЗКА", hintbook = "КНИГА-ПОДСКАЗКА", hintpaper = "ПОДСКАЗКА",
+        libraryhint = "ПОДСКАЗКА", padlock = "ЗАМОК",
+        lever = "РЫЧАГ", switch = "ПЕРЕКЛЮЧАТЕЛЬ", button = "КНОПКА", furnace = "ПЕЧЬ · СЖЕЧЬ",
+        incinerat = "ПЕЧЬ · СЖЕЧЬ", burn = "СЖЕЧЬ", fireplace = "КАМИН",
+        generator = "ГЕНЕРАТОР", lamp = "ЛАМПОЧКА", bulb = "ЛАМПОЧКА", fuse = "ПРЕДОХРАНИТЕЛЬ",
+        valve = "ВЕНТИЛЬ", breaker = "РУБИЛЬНИК", cable = "КАБЕЛЬ", wire = "ПРОВОД",
+        gear = "ШЕСТЕРНЯ", wheel = "КОЛЕСО", pipe = "ТРУБА",
+        drawer = "ТУМБА", chest = "СУНДУК", dresser = "КОМОД", nightstand = "ТУМБОЧКА",
+        toolbox = "ЯЩИК", shelf = "ПОЛКА", crate = "ЯЩИК", cabinet = "ШКАФ", cupboard = "ШКАФ",
+        locker = "ШКАФЧИК", toolshed = "ЯЩИК С ИНСТР.",
+    }
+
+    local LIB_WORDS   = { "livehintbook", "hintbook", "hintpaper", "libraryhint", "padlock" }
+    local LEVER_WORDS = { "lever", "switch", "button", "furnace", "incinerat", "burn", "fireplace" }
+    local GEN_WORDS   = { "generator", "lamp", "bulb", "fuse", "valve", "breaker", "cable", "wire", "gear", "wheel", "pipe" }
+    local CONT_WORDS  = { "drawer", "chest", "dresser", "nightstand", "toolbox", "shelf", "crate",
+                          "cabinet", "cupboard", "locker", "toolshed" }
+
+    local function hasAny(str, words)
+        for _, w in ipairs(words) do
+            if str:find(w, 1, true) then return w end
+        end
+        return nil
+    end
+
+    -- определяем, что это за объект, по ProximityPrompt и имени модели
+    local function classify(prompt, target)
+        local pn = prompt.Name:lower()
+        local act = (prompt.ActionText or ""):lower()
+        local tn = target.Name:lower()
+        local parentName = target.Parent and target.Parent.Name:lower() or ""
+
+        if pn:find("hide", 1, true) or act:find("hide", 1, true) then return nil end
+
+        local w = hasAny(tn .. " " .. parentName, LIB_WORDS)
+        if w then return "library", w end
+
+        if tn:find("door", 1, true) then return nil end
+
+        if pn == "moduleprompt" or pn == "lootprompt"
+            or act:find("take", 1, true) or act:find("collect", 1, true)
+            or act:find("loot", 1, true) or act:find("grab", 1, true) then
+            return "loot", nil
+        end
+
+        w = hasAny(tn, LEVER_WORDS) or hasAny(pn, LEVER_WORDS)
+        if w then return "lever", w end
+
+        w = hasAny(tn, GEN_WORDS)
+        if w then return "gen", w end
+
+        w = hasAny(tn, CONT_WORDS)
+        if w then return "container", w end
+
+        return nil
+    end
+
+    local tracked = {}
+    local hlCount = 0
+    local HL_CAP = 18 -- у Roblox лимит на количество Highlight, оставляем запас для сущностей
+
+    local function remove(prompt)
+        local e = tracked[prompt]
+        if not e then return end
+        tracked[prompt] = nil
+        if e.hl then hlCount -= 1 end
+        for _, o in ipairs({ e.hl, e.bb }) do
+            if o then pcall(function() o:Destroy() end) end
+        end
+    end
+
+    local function add(prompt)
+        if tracked[prompt] or not State.pzOn then return end
+        local target = prompt.Parent
+        if target and target:IsA("Attachment") then target = target.Parent end
+        if not target then return end
+        if target:IsA("BasePart") then
+            local m = target.Parent
+            if m and m:IsA("Model") and m.Parent and m.Parent.Name ~= "CurrentRooms" then
+                target = m
+            end
+        end
+
+        local cat, word = classify(prompt, target)
+        if not cat or not State.pz[GROUP[cat]] then return end
+
+        local part = target:IsA("BasePart") and target or getPart(target)
+        if not part then return end
+
+        local raw = target.Name
+        local text
+        if cat == "loot" then
+            text = ITEM_RU[(raw:lower():gsub("%s+", ""))] or raw
+        elseif word == "padlock" then
+            text = "ЗАМОК"
+        else
+            text = (WORD_RU[word] or tostring(word):upper()) .. " (" .. raw .. ")"
+        end
+
+        local colors = COL[cat]
+        local e = { cat = cat, word = word, text = text, part = part }
+
+        if hlCount < HL_CAP then
+            local hl = Instance.new("Highlight")
+            hl.Adornee = target
+            hl.FillColor = colors[1]
+            hl.FillTransparency = 0.6
+            hl.OutlineColor = Color3.new(1, 1, 1)
+            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            hl.Parent = espFolder
+            e.hl = hl
+            hlCount += 1
+        end
+
+        local bb = Instance.new("BillboardGui")
+        bb.Adornee = part
+        bb.AlwaysOnTop = true
+        bb.Size = UDim2.fromOffset(220, 30)
+        bb.StudsOffset = Vector3.new(0, 2, 0)
+        if cat == "loot" or cat == "container" then bb.MaxDistance = 90 end
+        bb.Parent = espFolder
+
+        local tl = Instance.new("TextLabel")
+        tl.BackgroundTransparency = 1
+        tl.Size = UDim2.fromScale(1, 1)
+        tl.Font = Enum.Font.GothamBold
+        tl.TextSize = 13
+        tl.TextColor3 = colors[2]
+        tl.TextStrokeTransparency = 0.3
+        tl.Text = text
+        tl.Parent = bb
+        e.bb, e.tl = bb, tl
+
+        tracked[prompt] = e
+    end
+
+    function PZ.clearAll()
+        for prompt in pairs(tracked) do remove(prompt) end
+        hlCount = 0
+    end
+
+    function PZ.scanAll()
+        local rooms = workspace:FindFirstChild("CurrentRooms")
+        if not rooms then return end
+        task.spawn(function()
+            for i, d in ipairs(rooms:GetDescendants()) do
+                if not State.pzOn then return end
+                if d:IsA("ProximityPrompt") then pcall(add, d) end
+                if i % 300 == 0 then task.wait() end
+            end
+        end)
+    end
+
+    function PZ.refresh()
+        PZ.clearAll()
+        if State.pzOn then PZ.scanAll() end
+    end
+
+    -- новые комнаты подгружаются по мере продвижения
+    connect(workspace.DescendantAdded, function(inst)
+        if State.pzOn and inst:IsA("ProximityPrompt") and inst:FindFirstAncestor("CurrentRooms") then
+            task.delay(0.35, function()
+                if inst.Parent then pcall(add, inst) end
+            end)
+        end
+    end)
+
+    -- код замка библиотеки: иконки на бумаге-подсказке сопоставляются с цифрами из книг
+    local function libraryCode()
+        local pg = lp:FindFirstChild("PlayerGui")
+        local perm = pg and pg:FindFirstChild("PermUI")
+        local hints = perm and perm:FindFirstChild("Hints")
+        if not hints then return nil end
+
+        local paper
+        for _, holder in ipairs({ lp.Character, lp:FindFirstChild("Backpack") }) do
+            if holder then
+                paper = holder:FindFirstChild("LibraryHintPaper")
+                if paper then break end
+            end
+        end
+        local ui = paper and paper:FindFirstChild("UI")
+        if not ui then return nil end
+
+        local code, known = { "_", "_", "_", "_", "_" }, 0
+        for _, icon in ipairs(ui:GetChildren()) do
+            local idx = tonumber(icon.Name)
+            if idx and idx >= 1 and idx <= 5 and icon:IsA("ImageLabel") then
+                for _, h in ipairs(hints:GetChildren()) do
+                    if h:IsA("ImageLabel") and h.ImageRectOffset == icon.ImageRectOffset then
+                        local tl = h:FindFirstChildWhichIsA("TextLabel")
+                        if tl and tl.Text ~= "" then
+                            code[idx] = tl.Text
+                            known += 1
+                        end
+                    end
+                end
+            end
+        end
+        return table.concat(code, " "), known
+    end
+
+    task.spawn(function()
+        local lastCode = ""
+        while gui.Parent do
+            if State.pzOn then
+                local char = lp.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+
+                for prompt, e in pairs(tracked) do
+                    local gone = not prompt.Parent or not e.part.Parent
+                    local used = (e.cat == "loot" or e.cat == "container") and not prompt.Enabled
+                    if gone or used then
+                        remove(prompt)
+                    elseif root then
+                        local d = (e.part.Position - root.Position).Magnitude
+                        e.tl.Text = string.format("%s [%dm]", e.text, d)
+                    end
+                end
+
+                if State.pz.library then
+                    local ok, text, known = pcall(libraryCode)
+                    if ok and text then
+                        if PZ.codeLabel then PZ.codeLabel.Text = text end
+                        for _, e in pairs(tracked) do
+                            if e.word == "padlock" then e.text = "ЗАМОК: " .. text end
+                        end
+                        if text ~= lastCode then
+                            lastCode = text
+                            if known and known > 0 then notify("Код библиотеки: " .. text) end
+                        end
+                    elseif PZ.codeLabel then
+                        PZ.codeLabel.Text = "нет бумаги-подсказки"
+                    end
+                end
+            end
+            task.wait(0.3)
+        end
+    end)
+end
+
+-- ========= Искусственный глитч: выход за карту и возврат =========
+local GL = { saved = nil, busy = false, hold = 0 }
+
+do
+    local function getRoot()
+        local char = lp.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if root and hum and hum.Health > 0 then return root end
+        return nil
+    end
+
+    -- забросить персонажа далеко за пределы карты (по горизонтали, чтобы не упасть в бездну)
+    -- anchor = true: удерживать на месте, пока не вернём сами (страховка от падения)
+    function GL.out(anchor)
+        local root = getRoot()
+        if not root or GL.saved then return false end
+        GL.saved = root.CFrame
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.CFrame = GL.saved + Vector3.new(3000, 0, 0)
+        if anchor then root.Anchored = true end
+        return true
+    end
+
+    -- вернуть на сохранённую точку
+    function GL.back()
+        local cf = GL.saved
+        if not cf then return false end
+        GL.saved = nil
+        local root = getRoot()
+        if root then
+            root.Anchored = false
+            root.AssemblyLinearVelocity = Vector3.zero
+            root.CFrame = cf
+        end
+        return true
+    end
+
+    -- ждём, пока игра сама вернёт персонажа (до 20 секунд)
+    function GL.watch()
+        task.spawn(function()
+            local saved = GL.saved
+            for _ = 1, 80 do
+                task.wait(0.25)
+                if GL.saved ~= saved then return end -- вернули вручную
+                local root = getRoot()
+                if not root then break end
+                if saved and (root.Position - saved.Position).Magnitude < 300 then
+                    GL.saved = nil
+                    GL.busy = false
+                    notify("Игра вернула тебя")
+                    return
+                end
+            end
+            if GL.saved == saved then
+                GL.saved = nil
+                GL.busy = false
+            end
+        end)
+    end
+
+    -- hold = 0: просто закидываем за карту, дальше возвращает игра
+    -- hold > 0: держим на месте и сами возвращаем через hold секунд
+    function GL.run()
+        if GL.busy or GL.saved then return end
+        GL.busy = true
+        local auto = GL.hold > 0
+        if GL.out(auto) then
+            if auto then
+                notify("За картой. Возврат через " .. GL.hold .. " с")
+                task.delay(GL.hold, function()
+                    GL.back()
+                    GL.busy = false
+                    notify("Вернулся на место")
+                end)
+            else
+                notify("За картой. Ждём, пока игра вернёт")
+                GL.watch()
+            end
+        else
+            GL.busy = false
+            notify("Персонаж не найден")
+        end
+    end
+end
+
 -- ========= Меню: пункты слева, функции справа =========
 -- ИГРОК
 makeToggle("Изменение скорости", false, function(v)
@@ -1182,6 +1540,59 @@ makeSpeedSlider("Скорость", MIN_SPEED, MAX_SPEED, State.speed, function(
     State.speed = v
 end, pages.player)
 
+-- Искусственный глитч (выход за карту)
+do
+    local function actionRow(text, btnText, cb)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, 0, 0, 48)
+        row.BackgroundColor3 = COLORS.item
+        row.BorderSizePixel = 0
+        row.LayoutOrder = nextOrder()
+        row.ZIndex = 3
+        row.Parent = pages.player
+        corner(row, 16)
+
+        local l = label(row, text, 14)
+        l.Position = UDim2.fromOffset(16, 0)
+        l.Size = UDim2.new(1, -130, 1, 0)
+        l.ZIndex = 4
+
+        local b = makeBtn(row)
+        b.Size = UDim2.fromOffset(96, 34)
+        b.Position = UDim2.new(1, -110, 0.5, -17)
+        b.BackgroundColor3 = COLORS.accent
+        b.Text = btnText
+        b.TextSize = 12
+        b.Font = Enum.Font.GothamBold
+        b.TextColor3 = COLORS.onAccent
+        b.ZIndex = 4
+        corner(b, 17)
+        hoverFx(b, COLORS.accent, COLORS.accent3)
+        connect(b.Activated, cb)
+    end
+
+    makeSpeedSlider("Вернуть сам, сек (0 = игра)", 0, 10, GL.hold, function(v)
+        GL.hold = v
+    end, pages.player)
+    actionRow("Создать глитч", "Запуск", GL.run)
+    actionRow("Вручную: за карту", "Выйти", function()
+        if GL.out(GL.hold > 0) then
+            if GL.hold > 0 then
+                notify("За картой. Нажми «Вернуть»")
+            else
+                notify("За картой. Ждём, пока игра вернёт")
+                GL.watch()
+            end
+        else
+            notify("Уже за картой или нет персонажа")
+        end
+    end)
+    actionRow("Вернуть на место", "Вернуть", function()
+        if not GL.back() then notify("Ты и так на месте") end
+        GL.busy = false
+    end)
+end
+
 -- ESP
 makeToggle("ESP сущностей", true, function(v) State.espOn = v end, pages.esp)
 makeToggle("Подсветка нужной двери", true, function(v)
@@ -1190,6 +1601,52 @@ makeToggle("Подсветка нужной двери", true, function(v)
 end, pages.esp)
 makeToggle("Авто-обнаружение новых", true, function(v) State.autoOn = v end, pages.esp)
 makeToggle("Уведомления о спавне", true, function(v) State.notifyOn = v end, pages.esp)
+
+-- ГОЛОВОЛОМКИ (всё выключено по умолчанию)
+makeToggle("Предметы и головоломки", false, function(v)
+    State.pzOn = v
+    if v then PZ.scanAll() else PZ.clearAll() end
+end, pages.pz)
+
+do
+    local sec = makeSection("ЧТО ПОКАЗЫВАТЬ", true, pages.pz)
+    makeSmallToggle("Предметы (тумбы, шкафы, сундуки)", true, function(v)
+        State.pz.loot = v
+        PZ.refresh()
+    end, sec)
+    makeSmallToggle("Библиотека: книги, замок, код", true, function(v)
+        State.pz.library = v
+        PZ.refresh()
+    end, sec)
+    makeSmallToggle("Шахты: генераторы и лампочки", true, function(v)
+        State.pz.gen = v
+        PZ.refresh()
+    end, sec)
+    makeSmallToggle("Рычаги и огонь (лестницы)", true, function(v)
+        State.pz.lever = v
+        PZ.refresh()
+    end, sec)
+
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 56)
+    row.BackgroundColor3 = COLORS.item
+    row.BorderSizePixel = 0
+    row.LayoutOrder = nextOrder()
+    row.ZIndex = 3
+    row.Parent = pages.pz
+    corner(row, 16)
+
+    local cap = label(row, "Код библиотеки", 12, COLORS.sub, Enum.Font.GothamMedium)
+    cap.Position = UDim2.fromOffset(16, 8)
+    cap.Size = UDim2.new(1, -32, 0, 16)
+    cap.ZIndex = 4
+
+    local val = label(row, "—", 18, COLORS.accent, Enum.Font.GothamBold)
+    val.Position = UDim2.fromOffset(16, 26)
+    val.Size = UDim2.new(1, -32, 0, 24)
+    val.ZIndex = 4
+    PZ.codeLabel = val
+end
 
 -- СУЩНОСТИ (по этажам)
 for _, f in ipairs(FLOORS) do
@@ -1330,6 +1787,9 @@ end)
 
 connect(closeBtn.Activated, function()
     State.speedOn = false
+    GL.back()
+    State.pzOn = false
+    PZ.clearAll()
     clearDoor()
     for m in pairs(tracked) do removeEsp(m) end
     for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
