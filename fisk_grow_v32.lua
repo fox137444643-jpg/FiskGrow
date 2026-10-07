@@ -10,7 +10,7 @@
     - v3.6: оформление Material You (чёрно-белое), фото-лого рядом с названием
     - v3.6: вкладка ГОЛОВОЛОМКИ (предметы, библиотека, генераторы, рычаги)
     - v3.6: локальные стрелки пути и отсчёт прыжка при погоне Seek
-    - v3.7: тумблер диагностики Seek (лог появляющихся объектов в буфер)
+    - v3.7: тумблер диагностики Seek; маршрут к двери по кнопке (фиксированный); компактное свёрнутое меню; уведомления справа как достижения
 ]]
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -34,7 +34,7 @@ local State = {
 }
 local MIN_SPEED, MAX_SPEED = 16, 80
 local FULL_SIZE = UDim2.fromOffset(580, 340)
-local COLLAPSED_SIZE = UDim2.fromOffset(580, 52)
+local COLLAPSED_SIZE = UDim2.fromOffset(236, 52)
 
 -- ========= Этажи и сущности =========
 local FLOORS = {
@@ -534,9 +534,14 @@ local EN_STRINGS = {
     ["Перейти"] = "Copy",
     ["Ссылка скопирована: t.me/fiskgrov"] = "Link copied: t.me/fiskgrov",
     ["RightShift - скрыть / показать меню"] = "RightShift - hide / show menu",
-    ["Стрелки пути при погоне Seek"] = "Seek chase path arrows",
-    ["Отсчёт прыжка при погоне Seek"] = "Seek chase jump countdown",
+    ["Маршрут к двери (стрелки)"] = "Route to door (arrows)",
+    ["Отсчёт прыжка на маршруте"] = "Jump countdown on route",
+    ["Диагностика Seek (лог в буфер)"] = "Seek diagnostics (log to clipboard)",
     ["ПРЫГАЙ!"] = "JUMP!",
+    ["ПРИСЯДЬ!"] = "CROUCH!",
+    ["ПРИСЯДЬ"] = "CROUCH",
+    ["Маршрут не найден"] = "Route not found",
+    ["Подсказки приседания на маршруте"] = "Crouch hints on route",
     ["Язык интерфейса"] = "Interface language",
     ["Сменить"] = "Change",
     ["Язык будет выбран при следующем запуске"] = "Language will be asked on next launch",
@@ -697,7 +702,7 @@ verChip.BorderSizePixel = 0
 verChip.ZIndex = 3
 verChip.Parent = top
 corner(verChip, 10)
-local ver = label(verChip, "v3.6", 11, COLORS.sub, Enum.Font.GothamMedium)
+local ver = label(verChip, "v3.7", 11, COLORS.sub, Enum.Font.GothamMedium)
 ver.Size = UDim2.fromScale(1, 1)
 ver.TextXAlignment = Enum.TextXAlignment.Center
 ver.ZIndex = 4
@@ -1175,18 +1180,23 @@ local function setCollapsed(v)
         body.Visible = not v
     end)
     setCollapseIcon(v and "chevright" or "chevdown")
+    if v then
+        verChip.Visible = false
+    else
+        task.delay(0.15, function() if not collapsed then verChip.Visible = true end end)
+    end
 end
 
 connect(collapseBtn.Activated, function()
     setCollapsed(not collapsed)
 end)
 
--- ========= Уведомления (snackbar Material 3) =========
+-- ========= Уведомления (как достижения: выезжают справа) =========
 local notifHolder = Instance.new("Frame")
 notifHolder.Name = "Notifications"
-notifHolder.AnchorPoint = Vector2.new(0.5, 0)
-notifHolder.Position = UDim2.new(0.5, 0, 0, 14)
-notifHolder.Size = UDim2.fromOffset(320, 0)
+notifHolder.AnchorPoint = Vector2.new(1, 0)
+notifHolder.Position = UDim2.new(1, -12, 0, 64)
+notifHolder.Size = UDim2.fromOffset(270, 0)
 notifHolder.AutomaticSize = Enum.AutomaticSize.Y
 notifHolder.BackgroundTransparency = 1
 notifHolder.Parent = gui
@@ -1194,7 +1204,7 @@ notifHolder.Parent = gui
 local notifLayout = Instance.new("UIListLayout")
 notifLayout.Padding = UDim.new(0, 6)
 notifLayout.SortOrder = Enum.SortOrder.LayoutOrder
-notifLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+notifLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
 notifLayout.Parent = notifHolder
 
 local notifOrder = 0
@@ -1202,31 +1212,53 @@ local function notify(text)
     if not State.notifyOn then return end
     notifOrder += 1
 
+    -- обёртка занимает место в списке, карточка внутри выезжает справа
+    local slot = Instance.new("Frame")
+    slot.Size = UDim2.fromOffset(270, 50)
+    slot.BackgroundTransparency = 1
+    slot.LayoutOrder = notifOrder
+    slot.Parent = notifHolder
+
     local card = Instance.new("Frame")
-    card.Size = UDim2.fromOffset(300, 42)
-    card.BackgroundColor3 = COLORS.text
-    card.BackgroundTransparency = 1
+    card.Size = UDim2.fromScale(1, 1)
+    card.Position = UDim2.fromOffset(300, 0)
+    card.BackgroundColor3 = COLORS.bg
+    card.BackgroundTransparency = 0.04
     card.BorderSizePixel = 0
-    card.LayoutOrder = notifOrder
-    card.Parent = notifHolder
+    card.Parent = slot
     corner(card, 14)
+    stroke(card, COLORS.outline, 0.55, 1)
 
-    local txt = label(card, text, 13, COLORS.onAccent, Enum.Font.GothamMedium)
-    txt.Position = UDim2.fromOffset(16, 0)
-    txt.Size = UDim2.new(1, -24, 1, 0)
-    txt.TextTransparency = 1
+    local dot = Instance.new("Frame")
+    dot.Size = UDim2.fromOffset(30, 30)
+    dot.Position = UDim2.fromOffset(10, 10)
+    dot.BackgroundColor3 = COLORS.item
+    dot.BorderSizePixel = 0
+    dot.Parent = card
+    corner(dot, 15)
+    local mark = label(dot, "F", 14, COLORS.accent, Enum.Font.GothamBold)
+    mark.Size = UDim2.fromScale(1, 1)
+    mark.TextXAlignment = Enum.TextXAlignment.Center
 
-    TweenService:Create(card, TweenInfo.new(0.18), { BackgroundTransparency = 0.03 }):Play()
-    TweenService:Create(txt, TweenInfo.new(0.18), { TextTransparency = 0 }):Play()
+    local head = label(card, "Fisk Grow", 11, COLORS.sub, Enum.Font.GothamMedium)
+    head.Position = UDim2.fromOffset(50, 6)
+    head.Size = UDim2.new(1, -58, 0, 14)
 
-    task.delay(2.6, function()
+    local txt = label(card, text, 13, COLORS.text, Enum.Font.GothamBold)
+    txt.Position = UDim2.fromOffset(50, 21)
+    txt.Size = UDim2.new(1, -58, 0, 22)
+    txt.TextTruncate = Enum.TextTruncate.AtEnd
+
+    TweenService:Create(card, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+        { Position = UDim2.fromOffset(0, 0) }):Play()
+
+    task.delay(3.2, function()
         if not card.Parent then return end
-        local t1 = TweenService:Create(card, TweenInfo.new(0.3), { BackgroundTransparency = 1 })
-        local t2 = TweenService:Create(txt, TweenInfo.new(0.3), { TextTransparency = 1 })
-        t1:Play()
-        t2:Play()
-        t1.Completed:Connect(function()
-            card:Destroy()
+        local t = TweenService:Create(card, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+            { Position = UDim2.fromOffset(300, 0) })
+        t:Play()
+        t.Completed:Connect(function()
+            slot:Destroy()
         end)
     end)
 end
@@ -1758,28 +1790,25 @@ do
     end)
 end
 
--- ========= Стрелки пути и отсчёт прыжка при погоне Seek (локально, только у тебя) =========
-State.seekArrows = true
+-- ========= Маршрут к двери: фиксированные стрелки (локально, только по кнопке) =========
+State.routeOn = false
 State.seekJump = true
+State.seekCrouch = true
 
 local SK = {}
 
 do
     local PathfindingService = game:GetService("PathfindingService")
-    local ARROW_COLOR = Color3.fromRGB(120, 255, 160)
-    local JUMP_COLOR = Color3.fromRGB(255, 80, 80)
-    local ARROW_GAP = 6
-    local MAX_ARROWS = 7
+    local ROUTE_COLOR = COLORS.door
+    local JUMP_COLOR = COLORS.danger
+    local CROUCH_COLOR = COLORS.egg
+    local ARROW_GAP = 8
+    local MAX_LEN = 260
+    local STAND_H, CROUCH_H = 5, 2.6   -- высота агента стоя / в приседе
+    local LOW_CEILING = 5.2            -- ниже этого потолка стоя не пройти
 
+    -- Seek нужен только для диагностики
     local seekModels = {}
-    local folder = nil
-    local marker = nil          -- { part, bb, tl, pos }
-    local waypoints = {}
-    local computing = false
-    local lastCompute = 0
-    local drawn = false
-
-    -- ищем модель Seek во время погони
     local function trackSeek(inst)
         if inst:IsA("Model") and (inst.Name == "SeekMoving" or inst.Name == "SeekMovingNewClone")
             and not seekModels[inst] then
@@ -1794,7 +1823,7 @@ do
     end)
     connect(workspace.DescendantAdded, trackSeek)
 
-    local function chaseActive()
+    function SK.chaseActive()
         for m in pairs(seekModels) do
             if m.Parent then return true end
             seekModels[m] = nil
@@ -1802,7 +1831,12 @@ do
         return false
     end
 
-    SK.chaseActive = chaseActive
+    local folder = nil
+    local route = nil      -- { pts, parts, goal, progress, hidden }
+    local markers = {}     -- { part, bb, tl, pos, idx, endIdx, kind }
+    local computing = false
+    local lastCompute = 0
+    local failGoal = nil
 
     local function ensureFolder()
         if folder and folder.Parent then return end
@@ -1811,13 +1845,17 @@ do
         folder.Parent = workspace.CurrentCamera or workspace
     end
 
+    local function killMarkers()
+        for _, m in ipairs(markers) do
+            pcall(function() m.bb:Destroy() end)
+        end
+        markers = {}
+    end
+
     function SK.clear()
         if folder then pcall(function() folder:ClearAllChildren() end) end
-        if marker then
-            pcall(function() marker.bb:Destroy() end)
-            marker = nil
-        end
-        drawn = false
+        killMarkers()
+        route = nil
     end
 
     local function newPart(size, cf, color)
@@ -1836,22 +1874,26 @@ do
     end
 
     local function segment(a, b, thick, color)
-        if (b - a).Magnitude < 0.05 then return end
-        newPart(Vector3.new(thick, 0.18, (b - a).Magnitude), CFrame.lookAt((a + b) / 2, b), color)
-    end
-
-    -- стрелка на полу: pos - точка на земле, dir - горизонтальное направление
-    local function drawArrow(pos, dir, color)
-        local right = dir:Cross(Vector3.yAxis)
-        local base = pos + Vector3.new(0, 0.25, 0)
-        local apex = base + dir * 1.2
-        segment(base - dir * 1.1, apex, 0.35, color)
-        segment(apex, apex - dir * 1.1 + right * 1.0, 0.35, color)
-        segment(apex, apex - dir * 1.1 - right * 1.0, 0.35, color)
+        if (b - a).Magnitude < 0.05 then return nil end
+        return newPart(Vector3.new(thick, 0.16, (b - a).Magnitude), CFrame.lookAt((a + b) / 2, b), color)
     end
 
     local function flat(v)
         return Vector3.new(v.X, 0, v.Z)
+    end
+
+    -- стрелка на полу, возвращает список частей
+    local function drawArrow(pos, dir, color)
+        local right = dir:Cross(Vector3.yAxis)
+        local base = pos + Vector3.new(0, 0.3, 0)
+        local apex = base + dir * 1.4
+        local out = {}
+        for _, p in ipairs({
+            segment(base - dir * 1.2, apex, 0.4, color),
+            segment(apex, apex - dir * 1.2 + right * 1.1, 0.4, color),
+            segment(apex, apex - dir * 1.2 - right * 1.1, 0.4, color),
+        }) do out[#out + 1] = p end
+        return out
     end
 
     -- точка на полу у следующей двери
@@ -1867,141 +1909,223 @@ do
         return pos
     end
 
-    -- путь от игрока до двери (расчёт на твоей стороне через PathfindingService)
-    local function compute(root, goal)
-        computing = true
+    -- расстояние от пола до потолка над точкой (невидимые и непроходимые-насквозь детали пропускаем)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    local function ceilingHeight(pos)
+        local ignore = {}
+        if folder then table.insert(ignore, folder) end
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl.Character then table.insert(ignore, pl.Character) end
+        end
+        rayParams.FilterDescendantsInstances = ignore
+        local origin = pos + Vector3.new(0, 0.4, 0)
+        for _ = 1, 4 do
+            local hit = workspace:Raycast(origin, Vector3.new(0, 8, 0), rayParams)
+            if not hit then return 99 end
+            local inst = hit.Instance
+            if inst.CanCollide and inst.Transparency < 1 then
+                return hit.Position.Y - pos.Y
+            end
+            table.insert(ignore, inst)
+            rayParams.FilterDescendantsInstances = ignore
+        end
+        return 99
+    end
+
+    local function compute(from, goal, height)
         local ok, wps = pcall(function()
             local path = PathfindingService:CreatePath({
-                AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4,
+                AgentRadius = height < 4 and 1.5 or 2, AgentHeight = height,
+                AgentCanJump = true, WaypointSpacing = 4,
             })
-            path:ComputeAsync(root.Position, goal)
+            path:ComputeAsync(from, goal)
             if path.Status == Enum.PathStatus.Success then
                 return path:GetWaypoints()
             end
             return nil
         end)
-        computing = false
         if ok then return wps end
         return nil
     end
 
-    local function redraw(root, goal)
-        if folder then folder:ClearAllChildren() end
-        if marker then
-            pcall(function() marker.bb:Destroy() end)
-            marker = nil
+    local function pathLen(wps)
+        local n = 0
+        for i = 2, #wps do n += (wps[i].Position - wps[i - 1].Position).Magnitude end
+        return n
+    end
+
+    local function makeMarker(pos, idx, endIdx, kind)
+        local anchor = newPart(Vector3.new(0.2, 0.2, 0.2), CFrame.new(pos + Vector3.new(0, 4, 0)),
+            kind == "jump" and JUMP_COLOR or CROUCH_COLOR)
+        anchor.Transparency = 1
+        local bb = Instance.new("BillboardGui")
+        bb.Adornee = anchor
+        bb.AlwaysOnTop = true
+        bb.Size = UDim2.fromOffset(180, 36)
+        bb.Parent = espFolder
+        local tl = Instance.new("TextLabel")
+        tl.BackgroundTransparency = 1
+        tl.Size = UDim2.fromScale(1, 1)
+        tl.Font = Enum.Font.GothamBold
+        tl.TextSize = 22
+        tl.TextColor3 = kind == "jump" and COLORS.text or COLORS.eggText
+        tl.TextStrokeColor3 = kind == "jump" and COLORS.danger or Color3.new(0, 0, 0)
+        tl.TextStrokeTransparency = 0.2
+        tl.Text = ""
+        tl.Parent = bb
+        markers[#markers + 1] = { part = anchor, bb = bb, tl = tl, pos = pos, idx = idx, endIdx = endIdx, kind = kind }
+    end
+
+    -- строим маршрут ОДИН раз и фиксируем в мире
+    local function build(goal, wps)
+        SK.clear()
+        if not wps or #wps < 2 then
+            -- пути нет: через стены НЕ рисуем, просто сообщаем (один раз на дверь)
+            if not failGoal or (failGoal - goal).Magnitude > 5 then
+                failGoal = goal
+                notify(T("Маршрут не найден"))
+            end
+            return
         end
+        failGoal = nil
         ensureFolder()
-        drawn = true
 
-        local points = {}
-        if #waypoints > 0 then
-            for _, wp in ipairs(waypoints) do
-                points[#points + 1] = { pos = wp.Position, jump = (wp.Action == Enum.PathWaypointAction.Jump) }
-            end
-        elseif goal then
-            -- путь не построился: стрелки по прямой в сторону двери
-            local floorY = root.Position.Y - 3
-            local from = Vector3.new(root.Position.X, floorY, root.Position.Z)
-            local to = Vector3.new(goal.X, floorY, goal.Z)
-            local d = flat(to - from)
-            if d.Magnitude > 1 then
-                for k = 1, MAX_ARROWS do
-                    local dist = k * ARROW_GAP
-                    if dist >= d.Magnitude then break end
-                    points[#points + 1] = { pos = from + d.Unit * dist, jump = false }
-                end
-            end
+        local pts = {}
+        for _, wp in ipairs(wps) do
+            pts[#pts + 1] = { pos = wp.Position, jump = (wp.Action == Enum.PathWaypointAction.Jump) }
         end
 
-        local prev = root.Position
-        local cum, lastArrow, arrows = 0, 0, 0
-        local jumpPos = nil
-        for i, pt in ipairs(points) do
-            cum += (pt.pos - prev).Magnitude
-            prev = pt.pos
-            if cum > 80 then break end
-            if cum >= 4 then
-                local nextPt = points[i + 1]
-                local dir = nextPt and flat(nextPt.pos - pt.pos) or flat(pt.pos - root.Position)
-                if dir.Magnitude < 0.3 then dir = flat(root.CFrame.LookVector) end
-                if dir.Magnitude > 0.01 then
-                    dir = dir.Unit
-                    if pt.jump and not jumpPos then
-                        jumpPos = pt.pos
-                        if State.seekJump then drawArrow(pt.pos, dir, JUMP_COLOR) end
-                    elseif State.seekArrows and arrows < MAX_ARROWS and cum - lastArrow >= ARROW_GAP then
-                        drawArrow(pt.pos, dir, ARROW_COLOR)
-                        arrows += 1
-                        lastArrow = cum
-                    end
+        local up = Vector3.new(0, 0.2, 0)
+        local parts, cum, lastArrow = {}, 0, -ARROW_GAP
+        local jumpIdx
+        local crouchStart, crouchEnd, crouchClosed
+        for i = 1, #pts - 1 do
+            local a, b = pts[i].pos, pts[i + 1].pos
+            cum += (b - a).Magnitude
+            if cum > MAX_LEN then break end
+            local list = {}
+            local isJump = pts[i + 1].jump
+            local isLow = State.seekCrouch and (ceilingHeight(a) < LOW_CEILING
+                or ceilingHeight(a:Lerp(b, 0.5)) < LOW_CEILING)
+
+            if isLow then
+                if not crouchStart then crouchStart = i end
+                if not crouchClosed then crouchEnd = i + 1 end
+            elseif crouchStart then
+                crouchClosed = true
+            end
+
+            local color = isJump and JUMP_COLOR or (isLow and CROUCH_COLOR or ROUTE_COLOR)
+            local seg = segment(a + up, b + up, 0.32, color)
+            if seg then list[#list + 1] = seg end
+
+            local dir = flat(b - a)
+            if dir.Magnitude > 0.1 then
+                dir = dir.Unit
+                if isJump and not jumpIdx and State.seekJump then
+                    jumpIdx = i + 1
+                    for _, pp in ipairs(drawArrow(b, dir, JUMP_COLOR)) do list[#list + 1] = pp end
+                elseif cum - lastArrow >= ARROW_GAP then
+                    lastArrow = cum
+                    for _, pp in ipairs(drawArrow(a:Lerp(b, 0.5), dir, color)) do list[#list + 1] = pp end
                 end
             end
+            parts[i] = list
         end
 
-        -- табло отсчёта над местом прыжка
-        if jumpPos and State.seekJump then
-            local anchor = newPart(Vector3.new(0.2, 0.2, 0.2), CFrame.new(jumpPos + Vector3.new(0, 4, 0)), JUMP_COLOR)
-            anchor.Transparency = 1
-            local bb = Instance.new("BillboardGui")
-            bb.Adornee = anchor
-            bb.AlwaysOnTop = true
-            bb.Size = UDim2.fromOffset(120, 36)
-            bb.Parent = espFolder
-            local tl = Instance.new("TextLabel")
-            tl.BackgroundTransparency = 1
-            tl.Size = UDim2.fromScale(1, 1)
-            tl.Font = Enum.Font.GothamBold
-            tl.TextSize = 24
-            tl.TextColor3 = Color3.fromRGB(255, 120, 120)
-            tl.TextStrokeTransparency = 0.2
-            tl.Text = ""
-            tl.Parent = bb
-            marker = { part = anchor, bb = bb, tl = tl, pos = jumpPos }
+        route = { pts = pts, parts = parts, goal = goal, progress = 1, hidden = 0 }
+        if jumpIdx then makeMarker(pts[jumpIdx].pos, jumpIdx, jumpIdx, "jump") end
+        if crouchStart then
+            makeMarker(pts[crouchStart].pos, crouchStart, crouchEnd or crouchStart, "crouch")
         end
     end
 
-    -- обновление отсчёта: время до прыжка = расстояние / текущая скорость
+    -- убираем пройденную часть маршрута, остальное стоит на месте
+    local function advance(root)
+        if not route then return end
+        local pts = route.pts
+        local best, bestD = route.progress, math.huge
+        for i = route.progress, math.min(route.progress + 12, #pts) do
+            local d = flat(pts[i].pos - root.Position).Magnitude
+            if d < bestD then best, bestD = i, d end
+        end
+        route.progress = best
+        for j = route.hidden + 1, best - 2 do
+            local list = route.parts[j]
+            if list then
+                for _, pp in ipairs(list) do pcall(function() pp:Destroy() end) end
+                route.parts[j] = nil
+            end
+            route.hidden = j
+        end
+        for k = #markers, 1, -1 do
+            if best > markers[k].endIdx then
+                pcall(function() markers[k].bb:Destroy() end)
+                table.remove(markers, k)
+            end
+        end
+        return bestD
+    end
+
     local function updateCountdown(root)
-        if not marker then return end
-        local vel = root.AssemblyLinearVelocity
-        local speed = math.max(flat(vel).Magnitude, 12)
-        local dist = flat(marker.pos - root.Position).Magnitude
-        local t = dist / speed
-        if t <= 0.35 then
-            marker.tl.Text = T("ПРЫГАЙ!")
-        else
-            marker.tl.Text = string.format("%.1f", t)
+        local speed = math.max(flat(root.AssemblyLinearVelocity).Magnitude, 12)
+        for _, m in ipairs(markers) do
+            local t = flat(m.pos - root.Position).Magnitude / speed
+            if m.kind == "jump" then
+                m.tl.Text = (t <= 0.35) and T("ПРЫГАЙ!") or string.format("%.1f", t)
+            else
+                local inside = route and route.progress >= m.idx
+                if inside or t <= 0.5 then
+                    m.tl.Text = T("ПРИСЯДЬ!")
+                else
+                    m.tl.Text = T("ПРИСЯДЬ") .. string.format(" %.1f", t)
+                end
+            end
         end
     end
 
     task.spawn(function()
         while gui.Parent do
-            local active = (State.seekArrows or State.seekJump) and chaseActive()
             local char = lp.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
-            if active and root then
+            if State.routeOn and root then
                 local goal = goalPos()
-                if goal and not computing and os.clock() - lastCompute > 0.5 then
-                    lastCompute = os.clock()
-                    task.spawn(function()
-                        local w = compute(root, goal)
-                        waypoints = w or {}
-                    end)
+                if goal then
+                    local offRoute = false
+                    if route then
+                        local d = advance(root)
+                        offRoute = d and d > 22
+                    end
+                    local goalMoved = route and (route.goal - goal).Magnitude > 5
+                    if (not route or goalMoved or offRoute) and not computing
+                        and os.clock() - lastCompute > 1.5 then
+                        lastCompute = os.clock()
+                        computing = true
+                        local startPos = root.Position
+                        task.spawn(function()
+                            local w1 = compute(startPos, goal, STAND_H)
+                            local w2 = State.seekCrouch and compute(startPos, goal, CROUCH_H) or nil
+                            local use = w1
+                            if not w1 then
+                                use = w2
+                            elseif w2 and pathLen(w2) < pathLen(w1) - 12 then
+                                use = w2 -- под препятствием заметно короче
+                            end
+                            if State.routeOn then build(goal, use) end
+                            computing = false
+                        end)
+                    end
                 end
-                pcall(redraw, root, goal)
-                pcall(updateCountdown, root)
-            elseif drawn then
+            elseif route or folder then
                 SK.clear()
-                waypoints = {}
             end
-            task.wait(0.1)
+            task.wait(0.15)
         end
     end)
 
-    -- пока идёт погоня, отсчёт обновляется чаще, чем стрелки
     connect(RunService.Heartbeat, function()
-        if marker and marker.part.Parent then
+        if #markers > 0 then
             local char = lp.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if root then pcall(updateCountdown, root) end
@@ -2061,13 +2185,17 @@ makeToggle(T("Подсветка нужной двери"), true, function(v)
 end, pages.esp)
 makeToggle(T("Авто-обнаружение новых"), true, function(v) State.autoOn = v end, pages.esp)
 makeToggle(T("Уведомления о спавне"), true, function(v) State.notifyOn = v end, pages.esp)
-makeToggle(T("Стрелки пути при погоне Seek"), true, function(v)
-    State.seekArrows = v
-    if not v and not State.seekJump then SK.clear() end
+makeToggle(T("Маршрут к двери (стрелки)"), false, function(v)
+    State.routeOn = v
+    if not v then SK.clear() end
 end, pages.esp)
-makeToggle(T("Отсчёт прыжка при погоне Seek"), true, function(v)
+makeToggle(T("Отсчёт прыжка на маршруте"), true, function(v)
     State.seekJump = v
-    if not v and not State.seekArrows then SK.clear() end
+    if State.routeOn then SK.clear() end -- маршрут перестроится с новой настройкой
+end, pages.esp)
+makeToggle(T("Подсказки приседания на маршруте"), true, function(v)
+    State.seekCrouch = v
+    if State.routeOn then SK.clear() end
 end, pages.esp)
 makeToggle(T("Диагностика Seek (лог в буфер)"), false, function(v)
     State.seekDiag = v
