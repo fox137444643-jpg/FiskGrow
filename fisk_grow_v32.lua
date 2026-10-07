@@ -9,7 +9,6 @@
     - Все кнопки работают через Activated (тап/мышь)
     - v3.6: оформление Material You (чёрно-белое), фото-лого рядом с названием
     - v3.6: вкладка ГОЛОВОЛОМКИ (предметы, библиотека, генераторы, рычаги)
-    - v3.6: искусственный глитч (выход за карту и возврат) во вкладке ИГРОК
 ]]
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -1262,16 +1261,15 @@ do
 
     local tracked = {}
     local hlCount = 0
-    local HL_CAP = 18 -- у Roblox лимит на количество Highlight, оставляем запас для сущностей
+    local HL_CAP = 8 -- у Roblox лимит на количество Highlight, оставляем запас для сущностей
 
     local function remove(prompt)
         local e = tracked[prompt]
         if not e then return end
         tracked[prompt] = nil
-        if e.hl then hlCount -= 1 end
-        for _, o in ipairs({ e.hl, e.bb }) do
-            if o then pcall(function() o:Destroy() end) end
-        end
+        if e.hl and e.cat ~= "loot" then hlCount -= 1 end
+        if e.hl then pcall(function() e.hl:Destroy() end) end
+        if e.bb then pcall(function() e.bb:Destroy() end) end
     end
 
     local function add(prompt)
@@ -1308,42 +1306,23 @@ do
         local colors = COL[cat]
         local e = { cat = cat, word = word, text = text, part = part }
 
-        if hlCount < HL_CAP then
+        if cat == "loot" or hlCount < HL_CAP then
             local hl = Instance.new("Highlight")
             hl.Adornee = target
             hl.FillColor = colors[1]
-            hl.FillTransparency = 0.6
+            hl.FillTransparency = cat == "loot" and 0.45 or 0.6
             hl.OutlineColor = Color3.new(1, 1, 1)
             hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            hl.Enabled = cat ~= "loot" -- предметы включаем по расстоянию в цикле
             hl.Parent = espFolder
             e.hl = hl
-            hlCount += 1
+            if cat ~= "loot" then hlCount += 1 end
         end
 
-        local bb = Instance.new("BillboardGui")
-        bb.Adornee = part
-        bb.AlwaysOnTop = true
-        if cat == "loot" then
-            -- у предметов вместо надписи маленький круглый маркер
-            bb.Size = UDim2.fromOffset(12, 12)
-            bb.StudsOffset = Vector3.new(0, 0.6, 0)
-            bb.MaxDistance = 120
-            bb.Parent = espFolder
-
-            local dot = Instance.new("Frame")
-            dot.Size = UDim2.fromScale(1, 1)
-            dot.BackgroundColor3 = colors[1]
-            dot.BorderSizePixel = 0
-            dot.Parent = bb
-            local dc = Instance.new("UICorner")
-            dc.CornerRadius = UDim.new(1, 0)
-            dc.Parent = dot
-            local ds = Instance.new("UIStroke")
-            ds.Color = Color3.new(1, 1, 1)
-            ds.Thickness = 1.5
-            ds.Parent = dot
-            e.bb = bb
-        else
+        if cat ~= "loot" then
+            local bb = Instance.new("BillboardGui")
+            bb.Adornee = part
+            bb.AlwaysOnTop = true
             bb.Size = UDim2.fromOffset(220, 30)
             bb.StudsOffset = Vector3.new(0, 2, 0)
             bb.Parent = espFolder
@@ -1436,15 +1415,23 @@ do
                 local char = lp.Character
                 local root = char and char:FindFirstChild("HumanoidRootPart")
 
+                local lootList = {}
                 for prompt, e in pairs(tracked) do
                     local gone = not prompt.Parent or not e.part.Parent
-                    local used = false
-                    if gone or used then
+                    if gone then
                         remove(prompt)
-                    elseif root and e.tl then
+                    elseif root then
                         local d = (e.part.Position - root.Position).Magnitude
-                        e.tl.Text = string.format("%s [%dm]", e.text, d)
+                        if e.tl then
+                            e.tl.Text = string.format("%s [%dm]", e.text, d)
+                        elseif e.cat == "loot" and e.hl then
+                            lootList[#lootList + 1] = { hl = e.hl, d = d }
+                        end
                     end
+                end
+                table.sort(lootList, function(a, b) return a.d < b.d end)
+                for i, it in ipairs(lootList) do
+                    it.hl.Enabled = i <= 20 and it.d <= 200
                 end
 
                 if State.pz.library then
@@ -1468,116 +1455,6 @@ do
     end)
 end
 
--- ========= Искусственный глитч: выход за карту и возврат =========
-local GL = { saved = nil, busy = false, hold = 0 }
-
-do
-    local function getRoot()
-        local char = lp.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if root and hum and hum.Health > 0 then return root end
-        return nil
-    end
-
-    -- забросить персонажа далеко за пределы карты (по горизонтали, чтобы не упасть в бездну)
-    -- anchor = true: удерживать на месте, пока не вернём сами (страховка от падения)
-    function GL.out(anchor)
-        local root = getRoot()
-        if not root or GL.saved then return false end
-        GL.saved = root.CFrame
-        root.AssemblyLinearVelocity = Vector3.zero
-        local char = root.Parent
-        local target = GL.saved + Vector3.new(3000, 0, 0)
-        local ok = pcall(function() char:PivotTo(target) end)
-        if not ok then root.CFrame = target end
-        if anchor then root.Anchored = true end
-        return true
-    end
-
-    -- вернуть на сохранённую точку
-    function GL.back()
-        local cf = GL.saved
-        if not cf then return false end
-        GL.saved = nil
-        local root = getRoot()
-        if root then
-            root.Anchored = false
-            root.AssemblyLinearVelocity = Vector3.zero
-            root.CFrame = cf
-        end
-        return true
-    end
-
-    -- ждём, пока игра сама вернёт персонажа (до 20 секунд)
-    function GL.watch()
-        task.spawn(function()
-            local saved = GL.saved
-            local t0 = os.clock()
-            for _ = 1, 80 do
-                task.wait(0.25)
-                if GL.saved ~= saved then return end -- вернули вручную
-                local root = getRoot()
-                if not root then break end
-                if saved and (root.Position - saved.Position).Magnitude < 300 then
-                    GL.saved = nil
-                    GL.busy = false
-                    if os.clock() - t0 < 1.5 then
-                        notify("Сразу откатило назад: сервер не пускает за карту")
-                    else
-                        notify("Игра вернула тебя")
-                    end
-                    return
-                end
-            end
-            if GL.saved == saved then
-                GL.saved = nil
-                GL.busy = false
-            end
-        end)
-    end
-
-    -- показываем, куда реально попал персонаж (для режима с удержанием)
-    function GL.check()
-        task.delay(0.6, function()
-            local saved = GL.saved
-            local root = getRoot()
-            if not (saved and root) then return end
-            local d = math.floor((root.Position - saved.Position).Magnitude)
-            if d < 300 then
-                notify("Не телепортировало: позиция не изменилась (" .. d .. ")")
-            else
-                notify("За картой: " .. d .. " studs")
-            end
-        end)
-    end
-
-    -- hold = 0: просто закидываем за карту, дальше возвращает игра
-    -- hold > 0: держим на месте и сами возвращаем через hold секунд
-    function GL.run()
-        if GL.busy or GL.saved then return end
-        GL.busy = true
-        local auto = GL.hold > 0
-        if GL.out(auto) then
-            if auto then
-                notify("Бросок... возврат через " .. GL.hold .. " с")
-                GL.check()
-                task.delay(GL.hold, function()
-                    GL.back()
-                    GL.busy = false
-                    notify("Вернулся на место")
-                end)
-            else
-                notify("За картой. Ждём, пока игра вернёт")
-                GL.watch()
-            end
-        else
-            GL.busy = false
-            notify("Персонаж не найден")
-        end
-    end
-end
-
 -- ========= Меню: пункты слева, функции справа =========
 -- ИГРОК
 makeToggle("Изменение скорости", false, function(v)
@@ -1586,60 +1463,6 @@ end, pages.player)
 makeSpeedSlider("Скорость", MIN_SPEED, MAX_SPEED, State.speed, function(v)
     State.speed = v
 end, pages.player)
-
--- Искусственный глитч (выход за карту)
-do
-    local function actionRow(text, btnText, cb)
-        local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, 0, 0, 48)
-        row.BackgroundColor3 = COLORS.item
-        row.BorderSizePixel = 0
-        row.LayoutOrder = nextOrder()
-        row.ZIndex = 3
-        row.Parent = pages.player
-        corner(row, 16)
-
-        local l = label(row, text, 14)
-        l.Position = UDim2.fromOffset(16, 0)
-        l.Size = UDim2.new(1, -130, 1, 0)
-        l.ZIndex = 4
-
-        local b = makeBtn(row)
-        b.Size = UDim2.fromOffset(96, 34)
-        b.Position = UDim2.new(1, -110, 0.5, -17)
-        b.BackgroundColor3 = COLORS.accent
-        b.Text = btnText
-        b.TextSize = 12
-        b.Font = Enum.Font.GothamBold
-        b.TextColor3 = COLORS.onAccent
-        b.ZIndex = 4
-        corner(b, 17)
-        hoverFx(b, COLORS.accent, COLORS.accent3)
-        connect(b.Activated, cb)
-    end
-
-    makeSpeedSlider("Вернуть сам, сек (0 = игра)", 0, 10, GL.hold, function(v)
-        GL.hold = v
-    end, pages.player)
-    actionRow("Создать глитч", "Запуск", GL.run)
-    actionRow("Вручную: за карту", "Выйти", function()
-        if GL.out(GL.hold > 0) then
-            if GL.hold > 0 then
-                notify("Бросок... потом нажми «Вернуть»")
-                GL.check()
-            else
-                notify("За картой. Ждём, пока игра вернёт")
-                GL.watch()
-            end
-        else
-            notify("Уже за картой или нет персонажа")
-        end
-    end)
-    actionRow("Вернуть на место", "Вернуть", function()
-        if not GL.back() then notify("Ты и так на месте") end
-        GL.busy = false
-    end)
-end
 
 -- ESP
 makeToggle("ESP сущностей", true, function(v) State.espOn = v end, pages.esp)
@@ -1835,7 +1658,6 @@ end)
 
 connect(closeBtn.Activated, function()
     State.speedOn = false
-    GL.back()
     State.pzOn = false
     PZ.clearAll()
     clearDoor()
