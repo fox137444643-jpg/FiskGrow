@@ -541,6 +541,7 @@ local EN_STRINGS = {
     ["ПРИСЯДЬ!"] = "CROUCH!",
     ["ПРИСЯДЬ"] = "CROUCH",
     ["Маршрут не найден"] = "Route not found",
+    ["Маршрут частичный"] = "Partial route",
     ["Подсказки приседания на маршруте"] = "Crouch hints on route",
     ["Язык интерфейса"] = "Interface language",
     ["Сменить"] = "Change",
@@ -1836,7 +1837,8 @@ do
     local markers = {}     -- { part, bb, tl, pos, idx, endIdx, kind }
     local computing = false
     local lastCompute = 0
-    local failGoal = nil
+    local failDoor = nil
+    local partialDoor = nil
 
     local function ensureFolder()
         if folder and folder.Parent then return end
@@ -1896,17 +1898,47 @@ do
         return out
     end
 
-    -- точка на полу у следующей двери
-    local function goalPos()
-        local door = getNextDoor()
-        if not door then return nil end
+    -- Цель маршрута: точка на полу ПЕРЕД дверью, а не внутри самой двери
+    -- (закрытая дверь твёрдая, pathfinding на цели внутри объекта выдаёт FailFinishNotEmpty)
+    local DOOR_OFFSET = 6
+    local doorCache = {}
+    local function doorGoals(door, rootPos)
+        if doorCache[door] then return doorCache[door] end
         local part = door:FindFirstChild("Door")
         if not (part and part:IsA("BasePart")) then part = getPart(door) end
         if not part then return nil end
-        local pos = part.Position
-        local hit = workspace:Raycast(pos + Vector3.new(0, 2, 0), Vector3.new(0, -14, 0))
-        if hit then pos = hit.Position end
-        return pos
+
+        local cf = part.CFrame
+        local axis = (part.Size.X < part.Size.Z) and cf.RightVector or cf.LookVector
+        axis = Vector3.new(axis.X, 0, axis.Z)
+        if axis.Magnitude < 0.1 then axis = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z) end
+        axis = axis.Unit
+
+        local base = part.Position
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        local ignore = { door }
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl.Character then table.insert(ignore, pl.Character) end
+        end
+        params.FilterDescendantsInstances = ignore
+
+        local function floorAt(p)
+            local hit = workspace:Raycast(Vector3.new(p.X, base.Y, p.Z), Vector3.new(0, -40, 0), params)
+            if hit then return hit.Position end
+            return Vector3.new(p.X, base.Y - part.Size.Y / 2, p.Z)
+        end
+
+        local pA = floorAt(base + axis * DOOR_OFFSET)
+        local pB = floorAt(base - axis * DOOR_OFFSET)
+        local goals
+        if (pA - rootPos).Magnitude <= (pB - rootPos).Magnitude then
+            goals = { pA, pB }
+        else
+            goals = { pB, pA }
+        end
+        doorCache[door] = goals
+        return goals
     end
 
     -- расстояние от пола до потолка над точкой (невидимые и непроходимые-насквозь детали пропускаем)
@@ -1933,19 +1965,45 @@ do
         return 99
     end
 
-    local function compute(from, goal, height)
-        local ok, wps = pcall(function()
+    -- возвращает waypoints, статус. Частичные пути (ClosestNoPath) тоже отдаём.
+    local lastStatus = "?"
+    local function compute(from, goal, height, radius)
+        local ok, wps, status = pcall(function()
             local path = PathfindingService:CreatePath({
-                AgentRadius = height < 4 and 1.5 or 2, AgentHeight = height,
+                AgentRadius = radius, AgentHeight = height,
                 AgentCanJump = true, WaypointSpacing = 4,
             })
             path:ComputeAsync(from, goal)
-            if path.Status == Enum.PathStatus.Success then
-                return path:GetWaypoints()
+            local st = path.Status
+            if st == Enum.PathStatus.Success
+                or st == Enum.PathStatus.ClosestNoPath
+                or st == Enum.PathStatus.ClosestOutOfRange then
+                local w = path:GetWaypoints()
+                if #w > 1 then return w, st end
             end
-            return nil
+            return nil, st
         end)
-        if ok then return wps end
+        if ok then
+            lastStatus = tostring(status)
+            return wps, status
+        end
+        lastStatus = "error"
+        return nil, nil
+    end
+
+    -- пробуем обе стороны двери и два радиуса; полный путь лучше частичного
+    local function attempt(from, goals, height)
+        local partial, partialGoal
+        for _, radius in ipairs({ height < 4 and 1.5 or 1.8, 1 }) do
+            for _, g in ipairs(goals) do
+                local w, st = compute(from, g, height, radius)
+                if w then
+                    if st == Enum.PathStatus.Success then return w, g, false end
+                    if not partial then partial, partialGoal = w, g end
+                end
+            end
+        end
+        if partial then return partial, partialGoal, true end
         return nil
     end
 
@@ -1978,17 +2036,22 @@ do
     end
 
     -- строим маршрут ОДИН раз и фиксируем в мире
-    local function build(goal, wps)
+    local function build(door, goal, wps, partial)
         SK.clear()
         if not wps or #wps < 2 then
             -- пути нет: через стены НЕ рисуем, просто сообщаем (один раз на дверь)
-            if not failGoal or (failGoal - goal).Magnitude > 5 then
-                failGoal = goal
-                notify(T("Маршрут не найден"))
+            if failDoor ~= door then
+                failDoor = door
+                notify(T("Маршрут не найден") .. " (" .. lastStatus:gsub("Enum.PathStatus.", "") .. ")")
+                warn("[FiskGrow] route failed: " .. lastStatus)
             end
             return
         end
-        failGoal = nil
+        failDoor = nil
+        if partial and partialDoor ~= door then
+            partialDoor = door
+            notify(T("Маршрут частичный"))
+        end
         ensureFolder()
 
         local pts = {}
@@ -2034,7 +2097,7 @@ do
             parts[i] = list
         end
 
-        route = { pts = pts, parts = parts, goal = goal, progress = 1, hidden = 0 }
+        route = { pts = pts, parts = parts, goal = goal, door = door, progress = 1, hidden = 0 }
         if jumpIdx then makeMarker(pts[jumpIdx].pos, jumpIdx, jumpIdx, "jump") end
         if crouchStart then
             makeMarker(pts[crouchStart].pos, crouchStart, crouchEnd or crouchStart, "crouch")
@@ -2090,29 +2153,43 @@ do
             local char = lp.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if State.routeOn and root then
-                local goal = goalPos()
-                if goal then
+                local door = getNextDoor()
+                if door then
                     local offRoute = false
                     if route then
                         local d = advance(root)
                         offRoute = d and d > 22
                     end
-                    local goalMoved = route and (route.goal - goal).Magnitude > 5
-                    if (not route or goalMoved or offRoute) and not computing
-                        and os.clock() - lastCompute > 1.5 then
+                    local doorChanged = route and route.door ~= door
+                    local needRetry = (not route) and (failDoor ~= door or os.clock() - lastCompute > 4)
+                    if (doorChanged or offRoute or needRetry)
+                        and not computing and os.clock() - lastCompute > 1.5 then
                         lastCompute = os.clock()
                         computing = true
                         local startPos = root.Position
                         task.spawn(function()
-                            local w1 = compute(startPos, goal, STAND_H)
-                            local w2 = State.seekCrouch and compute(startPos, goal, CROUCH_H) or nil
-                            local use = w1
-                            if not w1 then
-                                use = w2
-                            elseif w2 and pathLen(w2) < pathLen(w1) - 12 then
-                                use = w2 -- под препятствием заметно короче
+                            local goals = doorGoals(door, startPos)
+                            local use, useGoal, usePartial
+                            if goals then
+                                local w1, g1, p1 = attempt(startPos, goals, STAND_H)
+                                local w2, g2, p2
+                                if State.seekCrouch then
+                                    w2, g2, p2 = attempt(startPos, goals, CROUCH_H)
+                                end
+                                if w1 and not p1 then
+                                    use, useGoal, usePartial = w1, g1, false
+                                    if w2 and not p2 and pathLen(w2) < pathLen(w1) - 12 then
+                                        use, useGoal, usePartial = w2, g2, false -- под препятствием заметно короче
+                                    end
+                                elseif w2 and not p2 then
+                                    use, useGoal, usePartial = w2, g2, false
+                                elseif w1 then
+                                    use, useGoal, usePartial = w1, g1, true
+                                else
+                                    use, useGoal, usePartial = w2, g2, true
+                                end
                             end
-                            if State.routeOn then build(goal, use) end
+                            if State.routeOn then build(door, useGoal or Vector3.zero, use, usePartial) end
                             computing = false
                         end)
                     end
