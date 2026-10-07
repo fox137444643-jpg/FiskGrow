@@ -1289,12 +1289,8 @@ do
         local cat, word = classify(prompt, target)
         if not cat or not State.pz[GROUP[cat]] then return end
 
-        -- предмет, лежащий прямо в тумбе/шкафу: подсвечиваем сам предмет, а не контейнер
-        if cat == "loot" and hasAny(target.Name:lower(), CONT_WORDS) then
-            local pp = prompt.Parent
-            if pp and pp:IsA("Attachment") then pp = pp.Parent end
-            if pp then target = pp end
-        end
+        -- выдвижные части и сами тумбы/шкафы пропускаем: нужны только предметы внутри
+        if cat == "loot" and hasAny(target.Name:lower(), CONT_WORDS) then return end
 
         local part = target:IsA("BasePart") and target or getPart(target)
         if not part then return end
@@ -1327,21 +1323,42 @@ do
         local bb = Instance.new("BillboardGui")
         bb.Adornee = part
         bb.AlwaysOnTop = true
-        bb.Size = UDim2.fromOffset(220, 30)
-        bb.StudsOffset = Vector3.new(0, 2, 0)
-        if cat == "loot" or cat == "container" then bb.MaxDistance = 90 end
-        bb.Parent = espFolder
+        if cat == "loot" then
+            -- у предметов вместо надписи маленький круглый маркер
+            bb.Size = UDim2.fromOffset(12, 12)
+            bb.StudsOffset = Vector3.new(0, 0.6, 0)
+            bb.MaxDistance = 120
+            bb.Parent = espFolder
 
-        local tl = Instance.new("TextLabel")
-        tl.BackgroundTransparency = 1
-        tl.Size = UDim2.fromScale(1, 1)
-        tl.Font = Enum.Font.GothamBold
-        tl.TextSize = 13
-        tl.TextColor3 = colors[2]
-        tl.TextStrokeTransparency = 0.3
-        tl.Text = text
-        tl.Parent = bb
-        e.bb, e.tl = bb, tl
+            local dot = Instance.new("Frame")
+            dot.Size = UDim2.fromScale(1, 1)
+            dot.BackgroundColor3 = colors[1]
+            dot.BorderSizePixel = 0
+            dot.Parent = bb
+            local dc = Instance.new("UICorner")
+            dc.CornerRadius = UDim.new(1, 0)
+            dc.Parent = dot
+            local ds = Instance.new("UIStroke")
+            ds.Color = Color3.new(1, 1, 1)
+            ds.Thickness = 1.5
+            ds.Parent = dot
+            e.bb = bb
+        else
+            bb.Size = UDim2.fromOffset(220, 30)
+            bb.StudsOffset = Vector3.new(0, 2, 0)
+            bb.Parent = espFolder
+
+            local tl = Instance.new("TextLabel")
+            tl.BackgroundTransparency = 1
+            tl.Size = UDim2.fromScale(1, 1)
+            tl.Font = Enum.Font.GothamBold
+            tl.TextSize = 13
+            tl.TextColor3 = colors[2]
+            tl.TextStrokeTransparency = 0.3
+            tl.Text = text
+            tl.Parent = bb
+            e.bb, e.tl = bb, tl
+        end
 
         tracked[prompt] = e
     end
@@ -1424,7 +1441,7 @@ do
                     local used = false
                     if gone or used then
                         remove(prompt)
-                    elseif root then
+                    elseif root and e.tl then
                         local d = (e.part.Position - root.Position).Magnitude
                         e.tl.Text = string.format("%s [%dm]", e.text, d)
                     end
@@ -1470,7 +1487,10 @@ do
         if not root or GL.saved then return false end
         GL.saved = root.CFrame
         root.AssemblyLinearVelocity = Vector3.zero
-        root.CFrame = GL.saved + Vector3.new(3000, 0, 0)
+        local char = root.Parent
+        local target = GL.saved + Vector3.new(3000, 0, 0)
+        local ok = pcall(function() char:PivotTo(target) end)
+        if not ok then root.CFrame = target end
         if anchor then root.Anchored = true end
         return true
     end
@@ -1493,6 +1513,7 @@ do
     function GL.watch()
         task.spawn(function()
             local saved = GL.saved
+            local t0 = os.clock()
             for _ = 1, 80 do
                 task.wait(0.25)
                 if GL.saved ~= saved then return end -- вернули вручную
@@ -1501,13 +1522,32 @@ do
                 if saved and (root.Position - saved.Position).Magnitude < 300 then
                     GL.saved = nil
                     GL.busy = false
-                    notify("Игра вернула тебя")
+                    if os.clock() - t0 < 1.5 then
+                        notify("Сразу откатило назад: сервер не пускает за карту")
+                    else
+                        notify("Игра вернула тебя")
+                    end
                     return
                 end
             end
             if GL.saved == saved then
                 GL.saved = nil
                 GL.busy = false
+            end
+        end)
+    end
+
+    -- показываем, куда реально попал персонаж (для режима с удержанием)
+    function GL.check()
+        task.delay(0.6, function()
+            local saved = GL.saved
+            local root = getRoot()
+            if not (saved and root) then return end
+            local d = math.floor((root.Position - saved.Position).Magnitude)
+            if d < 300 then
+                notify("Не телепортировало: позиция не изменилась (" .. d .. ")")
+            else
+                notify("За картой: " .. d .. " studs")
             end
         end)
     end
@@ -1520,7 +1560,8 @@ do
         local auto = GL.hold > 0
         if GL.out(auto) then
             if auto then
-                notify("За картой. Возврат через " .. GL.hold .. " с")
+                notify("Бросок... возврат через " .. GL.hold .. " с")
+                GL.check()
                 task.delay(GL.hold, function()
                     GL.back()
                     GL.busy = false
@@ -1584,7 +1625,8 @@ do
     actionRow("Вручную: за карту", "Выйти", function()
         if GL.out(GL.hold > 0) then
             if GL.hold > 0 then
-                notify("За картой. Нажми «Вернуть»")
+                notify("Бросок... потом нажми «Вернуть»")
+                GL.check()
             else
                 notify("За картой. Ждём, пока игра вернёт")
                 GL.watch()
