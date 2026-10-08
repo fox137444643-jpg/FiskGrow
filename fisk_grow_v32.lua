@@ -521,6 +521,37 @@ local EN_STRINGS = {
     ["Изменение скорости"] = "Speed change",
     ["Скорость"] = "Speed",
     ["СКОРОСТЬ"] = "SPEED",
+    ["ОБХОД"] = "BYPASS",
+    ["УДАЛЕНИЕ СУЩНОСТЕЙ"] = "REMOVE ENTITIES",
+    ["БЕЗ УРОНА"] = "NO DAMAGE",
+    ["Удалить Screech"] = "Remove Screech",
+    ["Удалить Halt"] = "Remove Halt",
+    ["Удалить A-90"] = "Remove A-90",
+    ["Удалить Dread"] = "Remove Dread",
+    ["Удалить Surge"] = "Remove Surge",
+    ["Без урона от Screech"] = "No Screech damage",
+    ["Без урона от Halt"] = "No Halt damage",
+    ["Без урона от A-90"] = "No A-90 damage",
+    ["Без урона от Surge"] = "No Surge damage",
+    ["Обход Giggle"] = "Bypass Giggle",
+    ["Обход Dupe (фейковые двери)"] = "Bypass Dupe (fake doors)",
+    ["Обход Eyes"] = "Bypass Eyes",
+    ["Обход Lookman"] = "Bypass Lookman",
+    ["Обход яиц Gloombat"] = "Bypass Gloombat eggs",
+    ["Обход преград Seek"] = "Bypass Seek obstacles",
+    ["Обход Vacuum"] = "Bypass Vacuum",
+    ["Обход лавы"] = "Bypass lava",
+    ["Обход Seeking Wall"] = "Bypass Seeking Wall",
+    ["Обход Snare"] = "Bypass Snare",
+    ["Обход банана"] = "Bypass banana peel",
+    ["Обход Jeff"] = "Bypass Jeff",
+    ["ЛЮДИ"] = "USERS",
+    ["Показывать меня другим пользователям скрипта"] = "Show me to other script users",
+    ["Метка над игроками со скриптом"] = "Tag above players using the script",
+    ["Адрес сервера не задан (переменная FISK_API в скрипте)"] = "Server address not set (FISK_API variable in the script)",
+    ["Со скриптом на этом сервере: "] = "Using the script on this server: ",
+    ["всего онлайн: "] = "total online: ",
+    ["использует скрипт"] = "is using the script",
     ["Введите код доступа"] = "Enter access code",
     ["Код выдаётся в Telegram-канале Fisk Grow"] = "The code is posted in the Fisk Grow Telegram channel",
     ["Код"] = "Code",
@@ -1055,11 +1086,15 @@ end
 makeTab("player", T("ИГРОК"), "player")
 makeTab("esp", "ESP", "esp")
 makeTab("pz", T("ГОЛОВОЛОМКИ"), "pz")
+makeTab("bypass", T("ОБХОД"), "ent")
+makeTab("users", T("ЛЮДИ"), "player")
 makeTab("link", T("СВЯЗЬ"), "link")
 
 makePage("player")
 makePage("esp")
 makePage("pz")
+makePage("bypass")
+makePage("users")
 makePage("link")
 
 local content = pages.player
@@ -1813,6 +1848,7 @@ end
 
 function MV.unload()
     MV.unloaded = true
+    if MV.onUnload then pcall(MV.onUnload) end
     pcall(MV.hbDisable)
     pcall(function() MV.flyBody:Destroy() end)
     pcall(MV.applyAccel, false)
@@ -1835,10 +1871,16 @@ pcall(function()
         old = hm(game, "__namecall", nc(function(self, ...)
             if not MV.unloaded then
                 local method = gn()
-                if method == "FireServer" and typeof(self) == "Instance" and self.Name == "Crouch" then
-                    local a1 = ...
-                    if State.crouchSpoof or State.hbOn then a1 = true end
-                    return old(self, a1, true, select(3, ...))
+                if method == "FireServer" and typeof(self) == "Instance" then
+                    local nm = self.Name
+                    if nm == "Crouch" then
+                        local a1 = ...
+                        if State.crouchSpoof or State.hbOn then a1 = true end
+                        return old(self, a1, true, select(3, ...))
+                    elseif nm == "MotorReplication" and MV.eyesActive then
+                        if MV.special() then return old(self, 0, -65, 0, false) end
+                        return old(self, -650)
+                    end
                 end
             end
             return old(self, ...)
@@ -2576,6 +2618,522 @@ function DIAG.stop()
     local text = table.concat(DIAG.lines, "\n")
     print("[FiskGrow Seek diag] " .. #DIAG.lines .. " lines\n" .. text)
     pcall(function() setclipboard(text) end)
+end
+
+-- ========= Обход сущностей: удаление, отключение урона, обходы =========
+State.bp = {}
+local BP = {}
+
+do
+    local Rep = game:GetService("ReplicatedStorage")
+    local bpState = State.bp
+
+    -- ---------- Подмена ремоутов (отключение урона) ----------
+    local REMOTE_NAME = { NoScreech = "Screech", NoHalt = "ShadeResult", NoA90 = "A90", NoSurge = "SurgeRemote" }
+    local fakeRemotes, realRemotes, remoteApplied = {}, {}, {}
+
+    local function swapRemote(key, on)
+        local folder = MV.remotes()
+        if not folder then return end
+        local name = REMOTE_NAME[key]
+        if on then
+            if remoteApplied[key] then return end
+            local real = realRemotes[key] or folder:FindFirstChild(name)
+            if not real then return end -- на этом этаже такого ремоута нет, повторим позже
+            realRemotes[key] = real
+            local fake = fakeRemotes[key]
+            if not fake then
+                fake = Instance.new("RemoteEvent")
+                fake.Name = name
+                fakeRemotes[key] = fake
+            end
+            fake.Parent = folder
+            real.Parent = nil
+            remoteApplied[key] = true
+        else
+            if not remoteApplied[key] then return end
+            remoteApplied[key] = nil
+            local real, fake = realRemotes[key], fakeRemotes[key]
+            if real then real.Parent = folder end
+            if fake then fake.Parent = nil end
+        end
+    end
+
+    -- ---------- Удаление сущностей (отключаем их клиентские модули) ----------
+    local MODULE_KEYS = { RemoveScreech = "Screech", RemoveHalt = "Shade", RemoveA90 = "A90", RemoveDread = "Dread" }
+
+    local function findModule(orig)
+        local container
+        if orig == "Shade" then
+            local mc = Rep:FindFirstChild("ModulesClient") or Rep:FindFirstChild("ClientModules")
+            container = mc and mc:FindFirstChild("EntityModules")
+        else
+            local ui = lp:FindFirstChild("PlayerGui") and lp.PlayerGui:FindFirstChild("MainUI")
+            local init = ui and ui:FindFirstChild("Initiator")
+            local mg = init and init:FindFirstChild("Main_Game")
+            local rl = mg and mg:FindFirstChild("RemoteListener")
+            container = rl and rl:FindFirstChild("Modules")
+        end
+        if not container then return nil end
+        return container:FindFirstChild(orig) or container:FindFirstChild(orig .. "_Disabled")
+    end
+
+    local function applyModules(force)
+        for key, orig in pairs(MODULE_KEYS) do
+            if bpState[key] or force then
+                local m = findModule(orig)
+                if m then m.Name = bpState[key] and (orig .. "_Disabled") or orig end
+            end
+        end
+    end
+
+    local function applySurge(force)
+        if not (bpState.RemoveSurge or force) then return end
+        local ui = lp:FindFirstChild("PlayerGui") and lp.PlayerGui:FindFirstChild("MainUI")
+        local mf = ui and ui:FindFirstChild("MainFrame")
+        local f = mf and (mf:FindFirstChild("SurgeVignette") or mf:FindFirstChild("SurgeVignette_Disabled"))
+        if f then f.Name = bpState.RemoveSurge and "SurgeVignette_Disabled" or "SurgeVignette" end
+    end
+
+    local function applyGlitchScreech(force)
+        local fr = Rep:FindFirstChild("FloorReplicated")
+        if not fr then return end
+        for _, o in ipairs(fr:GetDescendants()) do
+            if o.Name == "GlitchScreech" and bpState.RemoveScreech then
+                o.Name = "GlitchScreech_Disabled"
+            elseif o.Name == "GlitchScreech_Disabled" and not bpState.RemoveScreech then
+                o.Name = "GlitchScreech"
+            end
+        end
+    end
+    do
+        local fr = Rep:FindFirstChild("FloorReplicated")
+        if fr then
+            connect(fr.DescendantAdded, function(o)
+                if o.Name == "GlitchScreech" and bpState.RemoveScreech then o.Name = "GlitchScreech_Disabled" end
+            end)
+        end
+    end
+
+    -- ---------- Обходы (отключаем касания/коллизии опасных объектов) ----------
+    local function eachPart(o, f)
+        for _, p in ipairs(o:GetDescendants()) do
+            if p:IsA("BasePart") then f(p) end
+        end
+    end
+
+    local bridges = {}
+    local hooked = setmetatable({}, { __mode = "k" })
+    local function once(o, tag, fn)
+        hooked[o] = hooked[o] or {}
+        if not hooked[o][tag] then
+            hooked[o][tag] = true
+            fn()
+        end
+    end
+
+    local APPLY = {}
+    APPLY.Giggle = function(o, on)
+        local h = o:WaitForChild("Hitbox", 5)
+        if h then h.CanTouch = not on end
+    end
+    APPLY.Dupe = function(o, on)
+        local h = o:WaitForChild("Hidden", 5)
+        if h then h.CanTouch = not on end
+        local lock = o:FindFirstChild("Lock")
+        local pr = lock and lock:FindFirstChild("UnlockPrompt")
+        if pr then pr.Enabled = not on end
+    end
+    APPLY.Gloom = function(o, on)
+        eachPart(o, function(p) p.CanTouch = not on end)
+        once(o, "da", function()
+            connect(o.DescendantAdded, function(p)
+                if p:IsA("BasePart") and bpState.Gloom then p.CanTouch = false end
+            end)
+        end)
+    end
+    APPLY.Vacuum = function(o, on)
+        local c = o:WaitForChild("Collision", 5)
+        if c then
+            c.CanCollide = on
+            c.CanTouch = not on
+        end
+    end
+    APPLY.Snare = function(o, on)
+        eachPart(o, function(p) p.CanTouch = not on end)
+        once(o, "da", function()
+            connect(o.DescendantAdded, function(p)
+                if p:IsA("BasePart") then p.CanTouch = not bpState.Snare end
+            end)
+        end)
+    end
+    APPLY.SeekArm = function(o, on)
+        eachPart(o, function(p) p.CanTouch = not on end)
+    end
+    APPLY.SeekFlood = function(o, on)
+        o.CanCollide = on
+        once(o, "cc", function()
+            connect(o:GetPropertyChangedSignal("CanCollide"), function()
+                if bpState.Seek and not o.CanCollide then o.CanCollide = true end
+            end)
+        end)
+    end
+    APPLY.SeekBridge = function(o, on)
+        bridges[o] = bridges[o] or {}
+        if on and #bridges[o] == 0 then
+            for _, child in ipairs(o:GetChildren()) do
+                if child.Name == "PlayerBarrier" and child:IsA("BasePart") and child.Size.Y == 2.75
+                    and (child.Rotation.X == 0 or child.Rotation.X == 180) then
+                    local nb = child:Clone()
+                    nb.CFrame = nb.CFrame * CFrame.new(0, 0, -5)
+                    nb.Name = "B" .. math.random(100000, 999999)
+                    nb.Size = Vector3.new(nb.Size.X, nb.Size.Y, 11)
+                    nb.Color = Color3.fromRGB(0, 255, 255)
+                    nb.Material = Enum.Material.ForceField
+                    nb.Parent = o
+                    table.insert(bridges[o], nb)
+                end
+            end
+        end
+        for _, b in ipairs(bridges[o]) do
+            if b.Parent then
+                b.CanCollide = on
+                b.Transparency = on and 0 or 1
+            end
+        end
+    end
+    APPLY.Lava = function(o, on) o.CanTouch = not on end
+    APPLY.Wall = function(o, on)
+        eachPart(o, function(p)
+            p.CanTouch = not on
+            p.CanCollide = not on
+            once(p, "sig", function()
+                connect(p:GetPropertyChangedSignal("CanTouch"), function()
+                    if bpState.Wall and p.CanTouch then p.CanTouch = false end
+                end)
+                connect(p:GetPropertyChangedSignal("CanCollide"), function()
+                    if bpState.Wall and p.CanCollide then p.CanCollide = false end
+                end)
+            end)
+        end)
+    end
+    APPLY.Banana = function(o, on) o.CanTouch = not on end
+    APPLY.Jeff = function(o, on)
+        eachPart(o, function(p)
+            p.CanCollide = not on
+            p.CanTouch = not on
+        end)
+        if on then
+            local hum = o:WaitForChild("Humanoid", 5)
+            if hum then hum.Health = 0 end
+        end
+    end
+
+    -- имя объекта -> { ключ тумблера, функция }
+    local RULES = {
+        GiggleCeiling = { "Giggle", APPLY.Giggle },
+        DoorFake = { "Dupe", APPLY.Dupe },
+        FakeDoor = { "Dupe", APPLY.Dupe },
+        GloomPile = { "Gloom", APPLY.Gloom },
+        SideroomSpace = { "Vacuum", APPLY.Vacuum },
+        Snare = { "Snare", APPLY.Snare },
+        Seek_Arm = { "Seek", APPLY.SeekArm },
+        ChandelierObstruction = { "Seek", APPLY.SeekArm },
+        SeekFloodline = { "Seek", APPLY.SeekFlood },
+        Bridge = { "Seek", APPLY.SeekBridge },
+        Lava = { "Lava", APPLY.Lava },
+        ScaryWall = { "Wall", APPLY.Wall },
+        BananaPeel = { "Banana", APPLY.Banana },
+        JeffTheKiller = { "Jeff", APPLY.Jeff },
+    }
+
+    local registry = setmetatable({}, { __mode = "k" }) -- объект -> правило
+    local touched = setmetatable({}, { __mode = "k" })  -- объекты, которые мы уже меняли
+
+    local function run(o, rule, on)
+        if on then touched[o] = true
+        elseif not touched[o] then return end
+        pcall(rule[2], o, on)
+    end
+
+    local function handle(o)
+        local rule = RULES[o.Name]
+        if not rule or registry[o] then return end
+        registry[o] = rule
+        if bpState[rule[1]] then task.spawn(run, o, rule, true) end
+    end
+
+    local function setObjects(key, v)
+        for o, rule in pairs(registry) do
+            if rule[1] == key and o.Parent then task.spawn(run, o, rule, v) end
+        end
+    end
+
+    task.spawn(function()
+        local rooms = workspace:WaitForChild("CurrentRooms", 60)
+        if not rooms or MV.unloaded then return end
+        connect(rooms.DescendantAdded, handle)
+        local n = 0
+        for _, d in ipairs(rooms:GetDescendants()) do
+            handle(d)
+            n += 1
+            if n % 400 == 0 then task.wait() end
+        end
+    end)
+
+    -- ---------- Eyes / Lookman: сообщаем серверу, что мы смотрим вниз ----------
+    connect(RunService.RenderStepped, function()
+        if MV.unloaded then return end
+        local isEyes = workspace:FindFirstChild("Eyes") ~= nil or workspace:FindFirstChild("Lookman") ~= nil
+        local isLook = workspace:FindFirstChild("BackdoorLookman") ~= nil
+        local active = (bpState.Eyes and isEyes) or (bpState.Lookman and isLook) or false
+        MV.eyesActive = active
+        if active then
+            local folder = MV.remotes()
+            local r = folder and folder:FindFirstChild("MotorReplication")
+            if r then
+                if MV.special() then pcall(function() r:FireServer(0, -65, 0, false) end)
+                else pcall(function() r:FireServer(-650) end) end
+            end
+        end
+        if bpState.RemoveScreech then
+            local cam = workspace.CurrentCamera
+            local sc = cam and cam:FindFirstChild("Screech")
+            if sc then sc:Destroy() end
+        end
+    end)
+
+    -- ---------- Включение / выключение ----------
+    local OBJ_KEYS = { Giggle = true, Dupe = true, Gloom = true, Vacuum = true, Snare = true, Seek = true,
+        Lava = true, Wall = true, Banana = true, Jeff = true }
+
+    function BP.set(key, v)
+        v = v and true or false
+        bpState[key] = v
+        if MODULE_KEYS[key] then
+            applyModules(true)
+            if key == "RemoveScreech" then applyGlitchScreech() end
+        elseif key == "RemoveSurge" then
+            applySurge(true)
+        elseif REMOTE_NAME[key] then
+            swapRemote(key, v)
+        elseif OBJ_KEYS[key] then
+            setObjects(key, v)
+        end
+    end
+
+    -- повторяем попытки: ремоуты/модули появляются не сразу и пересоздаются при респавне
+    task.spawn(function()
+        while gui.Parent and not MV.unloaded do
+            pcall(applyModules, false)
+            pcall(applySurge, false)
+            for key in pairs(REMOTE_NAME) do
+                if bpState[key] and not remoteApplied[key] then pcall(swapRemote, key, true) end
+            end
+            task.wait(1)
+        end
+    end)
+
+    MV.onUnload = function()
+        MV.eyesActive = false
+        for key in pairs(REMOTE_NAME) do pcall(swapRemote, key, false) end
+        for key in pairs(MODULE_KEYS) do bpState[key] = false end
+        bpState.RemoveSurge = false
+        pcall(applyModules, true)
+        pcall(applySurge, true)
+        pcall(applyGlitchScreech)
+        for key in pairs(OBJ_KEYS) do bpState[key] = false end
+        for o, rule in pairs(registry) do
+            if o.Parent then pcall(run, o, rule, false) end
+        end
+        for _, list in pairs(bridges) do
+            for _, b in ipairs(list) do pcall(function() b:Destroy() end) end
+        end
+        bridges = {}
+    end
+
+    -- ---------- Меню ----------
+    local function tg(sec, text, key)
+        makeToggle(T(text), false, function(v) BP.set(key, v) end, sec)
+    end
+
+    local secRemove = makeSection(T("УДАЛЕНИЕ СУЩНОСТЕЙ"), true, pages.bypass)
+    tg(secRemove, "Удалить Screech", "RemoveScreech")
+    tg(secRemove, "Удалить Halt", "RemoveHalt")
+    tg(secRemove, "Удалить A-90", "RemoveA90")
+    tg(secRemove, "Удалить Dread", "RemoveDread")
+    tg(secRemove, "Удалить Surge", "RemoveSurge")
+
+    local secDmg = makeSection(T("БЕЗ УРОНА"), false, pages.bypass)
+    tg(secDmg, "Без урона от Screech", "NoScreech")
+    tg(secDmg, "Без урона от Halt", "NoHalt")
+    tg(secDmg, "Без урона от A-90", "NoA90")
+    tg(secDmg, "Без урона от Surge", "NoSurge")
+
+    local secBp = makeSection(T("ОБХОД"), false, pages.bypass)
+    tg(secBp, "Обход Giggle", "Giggle")
+    tg(secBp, "Обход Dupe (фейковые двери)", "Dupe")
+    tg(secBp, "Обход Eyes", "Eyes")
+    tg(secBp, "Обход Lookman", "Lookman")
+    tg(secBp, "Обход яиц Gloombat", "Gloom")
+    tg(secBp, "Обход преград Seek", "Seek")
+    tg(secBp, "Обход Vacuum", "Vacuum")
+    tg(secBp, "Обход лавы", "Lava")
+    tg(secBp, "Обход Seeking Wall", "Wall")
+    tg(secBp, "Обход Snare", "Snare")
+    tg(secBp, "Обход банана", "Banana")
+    tg(secBp, "Обход Jeff", "Jeff")
+end
+
+-- ========= Люди: кто ещё использует скрипт (через сервер бота) =========
+-- Впиши сюда адрес своего приложения на Vercel, например: "https://my-bot.vercel.app/api/fisk"
+local FISK_API = ""
+
+State.shareMe = true
+State.tagUsers = true
+
+do
+    local HttpService = game:GetService("HttpService")
+    local reqFn = (syn and syn.request) or (http and http.request) or http_request or request
+    local users, tags, known = {}, {}, {}
+    local onlineTotal = 0
+    local statusLbl, listBox
+
+    local function fetch(action)
+        local url = string.format("%s?action=%s&uid=%d&name=%s&job=%s&place=%d",
+            FISK_API, action, lp.UserId, HttpService:UrlEncode(lp.Name),
+            HttpService:UrlEncode(game.JobId), game.PlaceId)
+        local body
+        if reqFn then
+            local r = reqFn({ Url = url, Method = "GET" })
+            body = r and r.Body
+        else
+            body = game:HttpGet(url)
+        end
+        return body and HttpService:JSONDecode(body)
+    end
+
+    local function clearTag(uid)
+        local t = tags[uid]
+        if t then pcall(function() t:Destroy() end) tags[uid] = nil end
+    end
+
+    local function updateTags()
+        for uid in pairs(tags) do
+            if not (State.tagUsers and users[uid]) then clearTag(uid) end
+        end
+        if not State.tagUsers then return end
+        for uid in pairs(users) do
+            local pl = Players:GetPlayerByUserId(uid)
+            local head = pl and pl.Character and pl.Character:FindFirstChild("Head")
+            local tag = tags[uid]
+            if head and (not tag or not tag.Parent or tag.Adornee ~= head) then
+                clearTag(uid)
+                local bb = Instance.new("BillboardGui")
+                bb.Name = "FiskUserTag"
+                bb.Adornee = head
+                bb.AlwaysOnTop = true
+                bb.Size = UDim2.fromOffset(120, 20)
+                bb.StudsOffset = Vector3.new(0, 2.6, 0)
+                bb.Parent = espFolder
+                local tl = label(bb, "Fisk Grow", 12, COLORS.accent, Enum.Font.GothamBold)
+                tl.Size = UDim2.fromScale(1, 1)
+                tl.TextXAlignment = Enum.TextXAlignment.Center
+                tl.TextStrokeTransparency = 0.4
+                tags[uid] = bb
+            end
+        end
+    end
+
+    local function render()
+        if not statusLbl then return end
+        if FISK_API == "" then
+            statusLbl.Text = T("Адрес сервера не задан (переменная FISK_API в скрипте)")
+        else
+            local n = 0
+            for _ in pairs(users) do n += 1 end
+            statusLbl.Text = T("Со скриптом на этом сервере: ") .. n .. "   |   " .. T("всего онлайн: ") .. onlineTotal
+        end
+        for _, c in ipairs(listBox:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
+        end
+        local order = 0
+        for uid, info in pairs(users) do
+            order += 1
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, 0, 0, 36)
+            row.BackgroundColor3 = COLORS.item
+            row.BorderSizePixel = 0
+            row.LayoutOrder = order
+            row.ZIndex = 3
+            row.Parent = listBox
+            corner(row, 14)
+            local l = label(row, info.name .. "   (" .. uid .. ")", 13)
+            l.Position = UDim2.fromOffset(14, 0)
+            l.Size = UDim2.new(1, -28, 1, 0)
+            l.ZIndex = 4
+        end
+    end
+
+    -- UI
+    makeToggle(T("Показывать меня другим пользователям скрипта"), true, function(v) State.shareMe = v end, pages.users)
+    makeToggle(T("Метка над игроками со скриптом"), true, function(v)
+        State.tagUsers = v
+        updateTags()
+    end, pages.users)
+
+    statusLbl = label(pages.users, "", 12, COLORS.sub)
+    statusLbl.Size = UDim2.new(1, 0, 0, 36)
+    statusLbl.TextWrapped = true
+    statusLbl.LayoutOrder = nextOrder()
+    statusLbl.ZIndex = 3
+
+    listBox = Instance.new("Frame")
+    listBox.BackgroundTransparency = 1
+    listBox.BorderSizePixel = 0
+    listBox.Size = UDim2.new(1, 0, 0, 0)
+    listBox.AutomaticSize = Enum.AutomaticSize.Y
+    listBox.LayoutOrder = nextOrder()
+    listBox.ZIndex = 3
+    listBox.Parent = pages.users
+    local ll = Instance.new("UIListLayout")
+    ll.Padding = UDim.new(0, 6)
+    ll.SortOrder = Enum.SortOrder.LayoutOrder
+    ll.Parent = listBox
+    render()
+
+    -- опрос сервера раз в 15 секунд
+    task.spawn(function()
+        while gui.Parent and not MV.unloaded do
+            if FISK_API ~= "" then
+                local ok, data = pcall(fetch, State.shareMe and "ping" or "list")
+                if ok and type(data) == "table" and data.ok then
+                    local new = {}
+                    for _, pl in ipairs(data.players or {}) do
+                        local uid = tonumber(pl.uid)
+                        if uid then
+                            new[uid] = { name = tostring(pl.name or uid) }
+                            if not known[uid] then
+                                pcall(notify, new[uid].name .. " " .. T("использует скрипт"))
+                            end
+                        end
+                    end
+                    known, users = new, new
+                    onlineTotal = tonumber(data.online) or 0
+                    pcall(render)
+                    pcall(updateTags)
+                end
+            end
+            task.wait(15)
+        end
+    end)
+    -- метки переживают респавн игроков
+    task.spawn(function()
+        while gui.Parent and not MV.unloaded do
+            task.wait(3)
+            pcall(updateTags)
+        end
+    end)
 end
 
 -- ========= Меню: пункты слева, функции справа =========
