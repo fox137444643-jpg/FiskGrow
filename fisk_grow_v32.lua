@@ -1,5 +1,5 @@
 --[[
-    Fisk Grow v3.7
+    Fisk Grow v4.0
     - ГОРИЗОНТАЛЬНОЕ прямоугольное меню: слева пункты (вкладки), справа содержимое
     - ESP только на сущностях; комнаты и объекты НЕ подсвечиваются
     - Подсвечивается только дверной проём, в который нужно идти (следующая дверь)
@@ -10,6 +10,8 @@
     - v3.6: оформление Material You (чёрно-белое), фото-лого рядом с названием
     - v3.6: вкладка ГОЛОВОЛОМКИ (предметы, библиотека, генераторы, рычаги)
     - v3.6: локальные стрелки пути и отсчёт прыжка при погоне Seek
+    - v4.0: полёт (Fly) из Abysall: тумблер, клавиша, ползунок скорости
+    - v3.8: скорость/ускорение, вид от третьего лица и перенос хитбокса портированы из Abysall (с кнопками/ползунками/клавишами)
     - v3.7: тумблер диагностики Seek; маршрут к двери по кнопке (фиксированный); компактное свёрнутое меню; уведомления справа как достижения
 ]]
 
@@ -25,14 +27,15 @@ local lp = Players.LocalPlayer
 -- ========= Настройки =========
 local State = {
     speedOn = false,
-    speed = 22,
+    speed = 0, -- величина буста (прибавляется к скорости игры)
     espOn = true,
     autoOn = true,
     notifyOn = true,
     doorOn = true,
     entityVisible = {},
 }
-local MIN_SPEED, MAX_SPEED = 16, 80
+local MIN_SPEED, MAX_SPEED = 0, 100
+local MV = {} -- движение: буст скорости, третье лицо, перенос хитбокса (см. блок ниже)
 local FULL_SIZE = UDim2.fromOffset(580, 340)
 local COLLAPSED_SIZE = UDim2.fromOffset(236, 52)
 
@@ -519,6 +522,22 @@ local EN_STRINGS = {
     ["нет бумаги-подсказки"] = "no hint paper",
     ["Изменение скорости"] = "Speed change",
     ["Скорость"] = "Speed",
+    ["СКОРОСТЬ"] = "SPEED",
+    ["ПОЛЁТ"] = "FLY",
+    ["Полёт (Fly)"] = "Fly",
+    ["Скорость полёта"] = "Fly speed",
+    ["Убрать ускорение (без скольжения)"] = "Remove acceleration (no sliding)",
+    ["ТРЕТЬЕ ЛИЦО"] = "THIRD PERSON",
+    ["Вид от третьего лица"] = "Third person view",
+    ["Клавиша"] = "Key",
+    ["Смещение X"] = "X offset",
+    ["Смещение Y"] = "Y offset",
+    ["Смещение Z"] = "Z offset",
+    ["Проверка стен"] = "Wall check",
+    ["ХИТБОКС"] = "HITBOX",
+    ["Перенос хитбокса"] = "Move hitbox",
+    ["Всегда приседать (Crouch Spoof)"] = "Always crouch (Crouch Spoof)",
+    ["Перенос хитбокса не работает на этом этаже"] = "Hitbox move is not supported on this floor",
     ["ESP сущностей"] = "Entity ESP",
     ["Подсветка нужной двери"] = "Highlight next door",
     ["Авто-обнаружение новых"] = "Auto-detect new ones",
@@ -712,7 +731,7 @@ verChip.BorderSizePixel = 0
 verChip.ZIndex = 3
 verChip.Parent = top
 corner(verChip, 10)
-local ver = label(verChip, "v3.7", 11, COLORS.sub, Enum.Font.GothamMedium)
+local ver = label(verChip, "v4.0", 11, COLORS.sub, Enum.Font.GothamMedium)
 ver.Size = UDim2.fromScale(1, 1)
 ver.TextXAlignment = Enum.TextXAlignment.Center
 ver.ZIndex = 4
@@ -990,11 +1009,15 @@ local function makeSwitch(row, big, default, callback)
 
     local on = default
     apply(on, true)
-    connect(track.Activated, function()
-        on = not on
+    local function set(v, silent)
+        v = v and true or false
+        if v == on then return end
+        on = v
         apply(on, false)
-        callback(on)
-    end)
+        if not silent then callback(on) end
+    end
+    connect(track.Activated, function() set(not on) end)
+    return set
 end
 
 -- ========= Тумблер (большой) =========
@@ -1014,7 +1037,7 @@ local function makeToggle(text, default, callback, parent)
     l.Size = UDim2.new(1, -86, 1, 0)
     l.ZIndex = 4
 
-    makeSwitch(row, true, default, callback)
+    return makeSwitch(row, true, default, callback)
 end
 
 -- ========= Тумблер (компактный, для списка сущностей) =========
@@ -1039,8 +1062,10 @@ local function makeSmallToggle(text, default, callback, parent)
 end
 
 -- ========= Слайдер скорости (Material 3) =========
-local function makeSpeedSlider(text, min, max, default, callback, parent)
+local function makeSpeedSlider(text, min, max, default, callback, parent, step)
     parent = parent or content
+    step = step or 1
+    local decimals = step < 1 and 1 or 0
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 88)
     row.BackgroundColor3 = COLORS.item
@@ -1138,7 +1163,8 @@ local function makeSpeedSlider(text, min, max, default, callback, parent)
 
     local value = default
     local function setValue(v)
-        v = math.clamp(math.floor(v + 0.5), min, max)
+        v = math.clamp(math.floor(v / step + 0.5) * step, min, max)
+        v = tonumber(string.format("%." .. decimals .. "f", v))
         value = v
         local a = (v - min) / (max - min)
         TweenService:Create(fill, TweenInfo.new(0.08), { Size = UDim2.new(a, 0, 1, 0) }):Play()
@@ -1169,11 +1195,50 @@ local function makeSpeedSlider(text, min, max, default, callback, parent)
             dragging = false
         end
     end)
-    connect(minus.Activated, function() setValue(value - 1) end)
-    connect(plus.Activated, function() setValue(value + 1) end)
+    connect(minus.Activated, function() setValue(value - step) end)
+    connect(plus.Activated, function() setValue(value + step) end)
     connect(box.FocusLost, function()
         local n = tonumber(box.Text)
         if n then setValue(n) else box.Text = tostring(value) end
+    end)
+end
+
+-- ========= Выбор клавиши (кнопка: нажми и затем нажми нужную клавишу, Esc - отмена) =========
+local function makeKeyBind(text, stateKey, parent)
+    parent = parent or content
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 48)
+    row.BackgroundColor3 = COLORS.item
+    row.BorderSizePixel = 0
+    row.LayoutOrder = nextOrder()
+    row.ZIndex = 3
+    row.Parent = parent
+    corner(row, 16)
+
+    local l = label(row, text, 14)
+    l.Position = UDim2.fromOffset(16, 0)
+    l.Size = UDim2.new(1, -130, 1, 0)
+    l.ZIndex = 4
+
+    local btn = makeBtn(row)
+    btn.Size = UDim2.fromOffset(92, 30)
+    btn.AnchorPoint = Vector2.new(1, 0.5)
+    btn.Position = UDim2.new(1, -14, 0.5, 0)
+    btn.BackgroundColor3 = COLORS.highest
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.TextColor3 = COLORS.accent
+    btn.Text = State[stateKey].Name
+    btn.ZIndex = 4
+    corner(btn, 15)
+    hoverFx(btn, COLORS.highest, COLORS.selected)
+
+    connect(btn.Activated, function()
+        btn.Text = "..."
+        MV.binding = function(code)
+            if code then State[stateKey] = code end
+            btn.Text = State[stateKey].Name
+        end
     end)
 end
 
@@ -1271,19 +1336,388 @@ local function notify(text)
     end)
 end
 
--- ========= Скорость (без WalkSpeed) =========
-connect(RunService.Heartbeat, function()
-    if not State.speedOn then return end
-    local char = lp.Character
-    if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not hum or not root or hum.Health <= 0 then return end
-    local md = hum.MoveDirection
-    if md.Magnitude > 0 then
-        local vel = root.AssemblyLinearVelocity
-        root.AssemblyLinearVelocity = Vector3.new(md.X * State.speed, vel.Y, md.Z * State.speed)
+-- ========= Движение (портировано из ыы) =========
+-- Буст скорости + "убрать ускорение", вид от третьего лица, перенос хитбокса (Position Spoof)
+State.noAccel = false
+State.crouchSpoof = false
+State.tpOn, State.tpX, State.tpY, State.tpZ, State.tpWall = false, 1.5, 1, 5, false
+State.hbOn = false
+State.tpKey, State.hbKey = Enum.KeyCode.T, Enum.KeyCode.B
+State.flyOn, State.flySpeed, State.flyKey = false, 20, Enum.KeyCode.F
+MV.flyBody = Instance.new("BodyVelocity")
+MV.flyBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+MV.flyBody.Velocity = Vector3.zero
+
+MV.ready, MV.unloaded = false, false
+MV.tpParts, MV.partProps = {}, {}
+MV.rayParams = RaycastParams.new()
+MV.rayParams.FilterType = Enum.RaycastFilterType.Exclude
+MV.lastCrouch, MV.lastFloor, MV.fl, MV.tpWasOn = 0, 0, "", false
+MV.hbApplied = false
+
+local HB_DEPTH = 2.346 -- на столько хитбокс уходит под землю (значение из оригинала)
+
+function MV.remotes()
+    local rs = game:GetService("ReplicatedStorage")
+    return rs:FindFirstChild("RemotesFolder") or rs:FindFirstChild("EntityInfo") or rs:FindFirstChild("Bricks")
+end
+
+function MV.floor()
+    local ok, v = pcall(function()
+        return game:GetService("ReplicatedStorage").GameData.Floor.Value
+    end)
+    local f = ok and v or ""
+    local r = MV.remotes()
+    if f == "Hotel" and r and r.Name == "Bricks" then f = "OldHotel" end
+    return f
+end
+
+function MV.special()
+    return MV.fl == "Fools" or MV.fl == "OldHotel"
+end
+
+function MV.fireCrouch(v)
+    local folder = MV.remotes()
+    local r = folder and folder:FindFirstChild("Crouch")
+    if r then pcall(function() r:FireServer(v, true) end) end
+end
+
+function MV.isCrouching()
+    if MV.special() then
+        return MV.char and MV.char:GetAttribute("Crouching") or false
     end
+    return MV.collisionPart ~= nil and MV.collisionPart.CollisionGroup == "PlayerCrouching"
+end
+
+-- Базовая скорость игры (как её считает сама игра) - к ней прибавляется буст
+function MV.getSpeed()
+    local char, hum = MV.char, MV.hum
+    local lm = game:GetService("ReplicatedStorage"):FindFirstChild("LiveModifiers")
+    local function has(n) return lm ~= nil and lm:FindFirstChild(n) ~= nil end
+    local s = 15
+    s += char:GetAttribute("SpeedBoost") or 0
+    s += char:GetAttribute("SpeedBoostBehind") or 0
+    s += char:GetAttribute("SpeedBoostExtra") or 0
+    if MV.fl == "Party" then s += 10 end
+    if has("PlayerFast") then s += 3 end
+    if has("PlayerFaster") then s += 6 end
+    if has("PlayerFastest") then s += 20 end
+    if has("PlayerSlow") then s -= 3 end
+    if has("PlayerSlowHealth") then s -= 0.075 * (hum.MaxHealth - hum.Health) end
+    if MV.isCrouching() then
+        if has("PlayerCrouchSlow") then s -= 8
+        elseif has("PlayerSlow") then s -= 8
+        else s -= 5 end
+    end
+    return s
+end
+
+-- "Убрать ускорение": тяжёлые физ. свойства, персонаж не скользит
+function MV.applyAccel(on)
+    for part, old in pairs(MV.partProps) do
+        if part.Parent then
+            pcall(function()
+                local restore = old ~= false and old or nil
+                part.CustomPhysicalProperties = on and MV.customPhysics or restore
+            end)
+        end
+    end
+end
+
+-- Направление полёта: куда смотрит камера (с наклоном вверх/вниз) + стрелки движения
+function MV.flyDir(cam)
+    local md = MV.hum.MoveDirection
+    if md == Vector3.zero or not cam then return Vector3.zero end
+    local look = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z)
+    local flat = CFrame.new(cam.CFrame.Position, cam.CFrame.Position + look)
+    local v = (cam.CFrame * CFrame.new(flat:VectorToObjectSpace(md))).Position - cam.CFrame.Position
+    if v == Vector3.zero then return v end
+    return v.Unit
+end
+
+-- ---- Перенос хитбокса (Position Spoof) ----
+function MV.hbEnable()
+    if MV.hbApplied or not MV.ready then return end
+    if MV.special() then
+        notify(T("Перенос хитбокса не работает на этом этаже"))
+        if MV.uiHB then MV.uiHB(false) end
+        return
+    end
+    local c, cp = MV.collision, MV.collisionPart
+    if not (c and cp) then
+        if MV.uiHB then MV.uiHB(false) end
+        return
+    end
+    MV.hbApplied = true
+    local cc = c:FindFirstChild("CollisionCrouch")
+    MV.orig = { col = c.CanCollide, ccrouch = cc and cc.CanCollide, root = MV.root.CanCollide }
+    local ok = pcall(function()
+        MV.cclone = c:Clone()
+        MV.cclone.Name = "CollisionClone"
+        MV.cclone.Massless = true
+        MV.cclone.Parent = MV.char
+        MV.cpclone = cp:Clone()
+        MV.cpclone.Name = "CollisionPartClone"
+        MV.cpclone.CanCollide = false
+        MV.cpclone.Massless = true
+        MV.cpclone.Parent = MV.char
+        local x = MV.cpclone:FindFirstChild("CollisionCrouch")
+        if x then x:Destroy() end
+    end)
+    if not ok or not MV.cclone then
+        MV.hbApplied = false
+        if MV.cclone then MV.cclone:Destroy() MV.cclone = nil end
+        if MV.cpclone then MV.cpclone:Destroy() MV.cpclone = nil end
+        if MV.uiHB then MV.uiHB(false) end
+        return
+    end
+    MV.root.CFrame = MV.root.CFrame * CFrame.new(0, -HB_DEPTH, 0)
+    MV.hum.HipHeight = 0.05
+    MV.fireCrouch(true)
+end
+
+function MV.hbDisable()
+    if not MV.hbApplied then return end
+    MV.hbApplied = false
+    local root, hum, c, cp = MV.root, MV.hum, MV.collision, MV.collisionPart
+    if root and root.Parent then
+        root.CFrame = root.CFrame * CFrame.new(0, HB_DEPTH, 0)
+        if c and c.Parent then
+            local rp = root.Position
+            c.Position = rp + Vector3.new(0, 0.18, 0)
+            if cp and cp.Parent then cp.Position = rp + Vector3.new(0, 0.18, 0) end
+            local cc = c:FindFirstChild("CollisionCrouch")
+            if cc then cc.Position = rp + Vector3.new(0, -0.982, 0) end
+            if MV.orig then
+                c.CanCollide = MV.orig.col
+                if cc and MV.orig.ccrouch ~= nil then cc.CanCollide = MV.orig.ccrouch end
+            end
+        end
+        if MV.orig then root.CanCollide = MV.orig.root end
+        local ls = MV.char and MV.char:FindFirstChild("LowerTorso")
+        local rj = ls and ls:FindFirstChild("Root")
+        if rj and MV.originalC1 then rj.C1 = MV.originalC1 end
+    end
+    if hum and hum.Parent then hum.HipHeight = 2.396 end
+    if MV.cclone then MV.cclone:Destroy() MV.cclone = nil end
+    if MV.cpclone then MV.cpclone:Destroy() MV.cpclone = nil end
+    MV.fireCrouch(MV.isCrouching())
+end
+
+function MV.hbStep(cam)
+    local char, root, c, cp, cclone = MV.char, MV.root, MV.collision, MV.collisionPart, MV.cclone
+    if not (cclone and cclone.Parent and c and c.Parent) then return end
+
+    if not (cam and cam:FindFirstChild("MinecartRig")) then root.CanCollide = false end
+    for _, part in ipairs(char:GetChildren()) do
+        if part:IsA("BasePart") then part.CanCollide = false end
+    end
+
+    c.CanCollide = false
+    local ccrouch = c:FindFirstChild("CollisionCrouch")
+    if ccrouch then ccrouch.CanCollide = false end
+    local clcrouch = cclone:FindFirstChild("CollisionCrouch")
+    if clcrouch then
+        local crouch = MV.isCrouching()
+        cclone.CanCollide = not crouch
+        clcrouch.CanCollide = crouch and true or false
+    else
+        root.CanCollide = true
+    end
+
+    local ls = char:FindFirstChild("LowerTorso")
+    local rj = ls and ls:FindFirstChild("Root")
+    if rj and MV.originalC1 then rj.C1 = MV.originalC1 * CFrame.new(0, -HB_DEPTH, 0) end
+
+    local pos = root.Position
+    c.Position = pos + Vector3.new(0, 2.328, 0)
+    if cp then cp.Position = pos + Vector3.new(0, 2.328, 0) end
+    if ccrouch and clcrouch then
+        ccrouch.Position = pos + Vector3.new(0, 1.328, 0)
+        clcrouch.CollisionGroup = ccrouch.CollisionGroup
+    end
+    if clcrouch then clcrouch.Position = pos + Vector3.new(0, 0.75, 0) end
+    cclone.CollisionGroup = c.CollisionGroup
+    cclone.Position = pos + Vector3.new(0, 1.75, 0)
+end
+
+-- ---- Персонаж ----
+function MV.setup(char)
+    MV.ready = false
+    MV.char, MV.hum, MV.root = char, nil, nil
+    MV.collision, MV.collisionPart, MV.cclone, MV.cpclone = nil, nil, nil, nil
+    MV.hbApplied, MV.originalC1 = false, nil
+    MV.flyBody.Parent = nil
+    MV.tpParts, MV.partProps = {}, {}
+    task.spawn(function()
+        local hum = char:WaitForChild("Humanoid", 15)
+        local root = char:WaitForChild("HumanoidRootPart", 15)
+        if not hum or not root or MV.char ~= char then return end
+        MV.hum, MV.root = hum, root
+        MV.fl = MV.floor()
+        MV.collision = char:WaitForChild("Collision", 8)
+        MV.collisionPart = char:FindFirstChild("CollisionPart") or MV.collision
+
+        local ls = char:FindFirstChild("LowerTorso")
+        local rj = ls and ls:FindFirstChild("Root")
+        MV.originalC1 = rj and rj.C1 or nil
+
+        for _, o in ipairs(char:GetDescendants()) do
+            if o:IsA("Accessory") and o:FindFirstChild("Handle") then
+                table.insert(MV.tpParts, o.Handle)
+            end
+        end
+        local head = char:WaitForChild("Head", 5)
+        if head then table.insert(MV.tpParts, head) end
+
+        for _, n in ipairs({ "SpeedBoost", "SpeedBoostBehind", "SpeedBoostExtra" }) do
+            if char:GetAttribute(n) == nil then char:SetAttribute(n, 0) end
+        end
+
+        local base = root.CustomPhysicalProperties or PhysicalProperties.new(Enum.Material.Plastic)
+        MV.customPhysics = PhysicalProperties.new(100, base.Friction, base.Elasticity, base.FrictionWeight, base.ElasticityWeight)
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                MV.partProps[part] = part.CustomPhysicalProperties or false
+            end
+        end
+        if State.noAccel then MV.applyAccel(true) end
+
+        MV.ready = true
+        if State.hbOn then
+            task.wait(1)
+            if MV.char == char then MV.hbEnable() end
+        end
+    end)
+end
+
+function MV.step()
+    if MV.unloaded or not MV.ready then return end
+    local char, hum, root = MV.char, MV.hum, MV.root
+    if not (char and char.Parent and hum and hum.Parent and root and root.Parent) then return end
+    if hum.Health <= 0 then return end
+    local cam = workspace.CurrentCamera
+
+    if tick() - MV.lastFloor > 1 then
+        MV.lastFloor = tick()
+        MV.fl = MV.floor()
+    end
+
+    -- Буст скорости: база игры + ползунок
+    if State.speedOn then
+        hum.WalkSpeed = MV.getSpeed() + State.speed
+    end
+
+    -- Перенос хитбокса
+    if MV.hbApplied then MV.hbStep(cam) end
+
+    -- Сообщаем серверу состояние приседания (как в оригинале)
+    if (State.speedOn or State.hbOn or State.crouchSpoof) and tick() - MV.lastCrouch > 0.1 then
+        MV.lastCrouch = tick()
+        local crouch = MV.isCrouching()
+        if State.crouchSpoof or State.hbOn then crouch = true end
+        MV.fireCrouch(crouch)
+    end
+
+    -- Полёт
+    if State.flyOn then
+        MV.flyBody.Parent = root
+        MV.flyBody.Velocity = MV.flyDir(cam) * State.flySpeed
+    elseif MV.flyBody.Parent then
+        MV.flyBody.Parent = nil
+    end
+
+    -- Вид от третьего лица
+    if cam then
+        if State.tpOn then
+            local off = CFrame.new(State.tpX, State.tpY, State.tpZ)
+            local moved = false
+            if State.tpWall then
+                MV.rayParams.FilterDescendantsInstances = { char }
+                local dir = (cam.CFrame * off).Position - cam.CFrame.Position
+                if dir.Magnitude > 0 then
+                    local res = workspace:Spherecast(cam.CFrame.Position, 0.2, dir, MV.rayParams)
+                    if res and res.Instance.CanCollide then
+                        local np = cam.CFrame.Position + dir.Unit * res.Distance
+                        cam.CFrame = CFrame.new(np, np + cam.CFrame.LookVector)
+                        moved = true
+                    end
+                end
+            end
+            if not moved then cam.CFrame = cam.CFrame * off end
+        end
+        if State.tpOn or MV.tpWasOn then
+            local t = State.tpOn and 0 or 1
+            for _, part in ipairs(MV.tpParts) do
+                if part.Parent then
+                    part.Transparency = t
+                    part.LocalTransparencyModifier = t
+                end
+            end
+        end
+        MV.tpWasOn = State.tpOn
+    end
+end
+
+function MV.unload()
+    MV.unloaded = true
+    pcall(MV.hbDisable)
+    pcall(function() MV.flyBody:Destroy() end)
+    pcall(MV.applyAccel, false)
+    pcall(function()
+        if MV.hum and MV.hum.Parent then MV.hum.WalkSpeed = MV.getSpeed() end
+    end)
+    pcall(function()
+        for _, part in ipairs(MV.tpParts) do
+            part.Transparency = 1
+            part.LocalTransparencyModifier = 1
+        end
+    end)
+end
+
+-- Хук Crouch (как в оригинале: второй аргумент всегда true, при спуфе - приседание всегда)
+pcall(function()
+    local hm, nc, gn = hookmetamethod, newcclosure, getnamecallmethod
+    if type(hm) == "function" and type(nc) == "function" and type(gn) == "function" then
+        local old
+        old = hm(game, "__namecall", nc(function(self, ...)
+            if not MV.unloaded then
+                local method = gn()
+                if method == "FireServer" and typeof(self) == "Instance" and self.Name == "Crouch" then
+                    local a1 = ...
+                    if State.crouchSpoof or State.hbOn then a1 = true end
+                    return old(self, a1, true, select(3, ...))
+                end
+            end
+            return old(self, ...)
+        end))
+    end
+end)
+
+connect(RunService.RenderStepped, function()
+    local ok, err = pcall(MV.step)
+    if not ok and not MV.warned then
+        MV.warned = true
+        warn("[FiskGrow] MV.step: " .. tostring(err))
+    end
+end)
+
+connect(lp.CharacterAdded, MV.setup)
+if lp.Character then MV.setup(lp.Character) end
+
+-- Горячие клавиши + назначение клавиш из меню
+connect(UIS.InputBegan, function(i, gpe)
+    if i.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if MV.binding then
+        local cb = MV.binding
+        MV.binding = nil
+        cb(i.KeyCode ~= Enum.KeyCode.Escape and i.KeyCode or nil)
+        return
+    end
+    if gpe then return end
+    if i.KeyCode == State.tpKey and MV.uiTP then MV.uiTP(not State.tpOn) end
+    if i.KeyCode == State.hbKey and MV.uiHB then MV.uiHB(not State.hbOn) end
+    if i.KeyCode == State.flyKey and MV.uiFly then MV.uiFly(not State.flyOn) end
 end)
 
 -- ========= ESP =========
@@ -2576,12 +3010,55 @@ end
 
 -- ========= Меню: пункты слева, функции справа =========
 -- ИГРОК
-makeToggle(T("Изменение скорости"), false, function(v)
-    State.speedOn = v
-end, pages.player)
-makeSpeedSlider(T("Скорость"), MIN_SPEED, MAX_SPEED, State.speed, function(v)
-    State.speed = v
-end, pages.player)
+-- Скорость
+do
+    local sec = makeSection(T("СКОРОСТЬ"), true, pages.player)
+    makeToggle(T("Изменение скорости"), false, function(v)
+        State.speedOn = v
+        if not v and MV.ready and MV.hum then pcall(function() MV.hum.WalkSpeed = MV.getSpeed() end) end
+    end, sec)
+    makeSpeedSlider(T("Скорость"), MIN_SPEED, MAX_SPEED, State.speed, function(v)
+        State.speed = v
+        if State.speedOn then MV.fireCrouch(true) end
+    end, sec)
+    makeToggle(T("Убрать ускорение (без скольжения)"), false, function(v)
+        State.noAccel = v
+        MV.applyAccel(v)
+    end, sec)
+end
+
+-- Полёт
+do
+    local sec = makeSection(T("ПОЛЁТ"), false, pages.player)
+    MV.uiFly = makeToggle(T("Полёт (Fly)"), false, function(v) State.flyOn = v end, sec)
+    makeKeyBind(T("Клавиша"), "flyKey", sec)
+    makeSpeedSlider(T("Скорость полёта"), 0, 115, State.flySpeed, function(v) State.flySpeed = v end, sec)
+end
+
+-- Вид от третьего лица
+do
+    local sec = makeSection(T("ТРЕТЬЕ ЛИЦО"), false, pages.player)
+    MV.uiTP = makeToggle(T("Вид от третьего лица"), false, function(v) State.tpOn = v end, sec)
+    makeKeyBind(T("Клавиша"), "tpKey", sec)
+    makeSpeedSlider(T("Смещение X"), -10, 10, State.tpX, function(v) State.tpX = v end, sec, 0.1)
+    makeSpeedSlider(T("Смещение Y"), -10, 10, State.tpY, function(v) State.tpY = v end, sec, 0.1)
+    makeSpeedSlider(T("Смещение Z"), -10, 10, State.tpZ, function(v) State.tpZ = v end, sec, 0.1)
+    makeToggle(T("Проверка стен"), false, function(v) State.tpWall = v end, sec)
+end
+
+-- Перенос хитбокса
+do
+    local sec = makeSection(T("ХИТБОКС"), false, pages.player)
+    MV.uiHB = makeToggle(T("Перенос хитбокса"), false, function(v)
+        State.hbOn = v
+        if v then MV.hbEnable() else MV.hbDisable() end
+    end, sec)
+    makeKeyBind(T("Клавиша"), "hbKey", sec)
+    makeToggle(T("Всегда приседать (Crouch Spoof)"), false, function(v)
+        State.crouchSpoof = v
+        MV.fireCrouch(v and true or MV.isCrouching())
+    end, sec)
+end
 
 -- Разрешить прыжок / слайд (атрибуты персонажа CanJump / CanSlide, локально)
 State.allowJump, State.allowSlide = false, false
@@ -2845,6 +3322,7 @@ end)
 
 connect(closeBtn.Activated, function()
     State.speedOn = false
+    MV.unload()
     State.pzOn = false
     PZ.clearAll()
     SK.clear()
