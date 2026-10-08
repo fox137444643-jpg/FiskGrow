@@ -10,6 +10,7 @@
     - v3.6: оформление Material You (чёрно-белое), фото-лого рядом с названием
     - v3.6: вкладка ГОЛОВОЛОМКИ (предметы, библиотека, генераторы, рычаги)
     - v3.6: локальные стрелки пути и отсчёт прыжка при погоне Seek
+    - v4.0: удалён маршрут на Seek; код доступа при первом запуске (SERHFISKTT, запоминается в fiskgrow_key.txt)
     - v4.0: полёт (Fly) из Abysall: тумблер, клавиша, ползунок скорости
     - v3.8: скорость/ускорение, вид от третьего лица и перенос хитбокса портированы из Abysall (с кнопками/ползунками/клавишами)
     - v3.7: тумблер диагностики Seek; маршрут к двери по кнопке (фиксированный); компактное свёрнутое меню; уведомления справа как достижения
@@ -523,6 +524,13 @@ local EN_STRINGS = {
     ["Изменение скорости"] = "Speed change",
     ["Скорость"] = "Speed",
     ["СКОРОСТЬ"] = "SPEED",
+    ["Введите код доступа"] = "Enter access code",
+    ["Код выдаётся в Telegram-канале Fisk Grow"] = "The code is posted in the Fisk Grow Telegram channel",
+    ["Код"] = "Code",
+    ["Войти"] = "Enter",
+    ["Копировать ссылку на Telegram"] = "Copy Telegram link",
+    ["Неверный код"] = "Wrong code",
+    ["Закрыть"] = "Close",
     ["ПОЛЁТ"] = "FLY",
     ["Полёт (Fly)"] = "Fly",
     ["Скорость полёта"] = "Fly speed",
@@ -668,6 +676,153 @@ if not LANG then
         task.wait(0.05)
     end
     if not LANG then LANG = "ru" end
+end
+
+-- ========= Код доступа: спрашивается при первом запуске, дальше запоминается =========
+local ACCESS_CODE = "SERHFISKTT"
+local ACCESS_FILE = "fiskgrow_key.txt"
+local TG_LINK = "https://t.me/fiskgrov"
+local function normCode(str)
+    return (tostring(str or ""):gsub("%s+", "")):upper()
+end
+
+local accessOk = false
+pcall(function()
+    if isfile and readfile and isfile(ACCESS_FILE) and normCode(readfile(ACCESS_FILE)) == ACCESS_CODE then
+        accessOk = true
+    end
+end)
+
+if not accessOk then
+    local overlay = Instance.new("Frame")
+    overlay.Name = "AccessGate"
+    overlay.Size = UDim2.fromScale(1, 1)
+    overlay.BackgroundColor3 = Color3.new(0, 0, 0)
+    overlay.BackgroundTransparency = 0.35
+    overlay.BorderSizePixel = 0
+    overlay.Active = true
+    overlay.ZIndex = 60
+    overlay.Parent = gui
+
+    local card = Instance.new("Frame")
+    card.AnchorPoint = Vector2.new(0.5, 0.5)
+    card.Position = UDim2.fromScale(0.5, 0.5)
+    card.Size = UDim2.fromOffset(340, 392)
+    card.BackgroundColor3 = COLORS.bg
+    card.BorderSizePixel = 0
+    card.Active = true
+    card.ZIndex = 61
+    card.Parent = overlay
+    corner(card, 28)
+    stroke(card, COLORS.outline, 0.65, 1)
+
+    local pl = Instance.new("ImageLabel")
+    pl.AnchorPoint = Vector2.new(0.5, 0)
+    pl.Position = UDim2.new(0.5, 0, 0, 22)
+    pl.Size = UDim2.fromOffset(64, 64)
+    pl.BackgroundColor3 = COLORS.item
+    pl.BorderSizePixel = 0
+    pl.Image = logoImage or ""
+    pl.ScaleType = Enum.ScaleType.Crop
+    pl.ZIndex = 62
+    pl.Parent = card
+    corner(pl, 32)
+    stroke(pl, COLORS.accent, 0.55, 1.5)
+    if not logoImage then
+        local f = label(pl, "F", 28, COLORS.accent, Enum.Font.GothamBold)
+        f.Size = UDim2.fromScale(1, 1)
+        f.TextXAlignment = Enum.TextXAlignment.Center
+        f.ZIndex = 63
+    end
+
+    local function centered(text, size, color, font, y, h)
+        local l = label(card, text, size, color, font)
+        l.Position = UDim2.fromOffset(16, y)
+        l.Size = UDim2.new(1, -32, 0, h)
+        l.TextXAlignment = Enum.TextXAlignment.Center
+        l.TextWrapped = true
+        l.ZIndex = 62
+        return l
+    end
+    centered("Fisk Grow", 20, COLORS.text, Enum.Font.GothamBold, 94, 26)
+    centered(T("Введите код доступа"), 14, COLORS.text, Enum.Font.GothamMedium, 124, 20)
+    centered(T("Код выдаётся в Telegram-канале Fisk Grow"), 12, COLORS.sub, Enum.Font.GothamMedium, 146, 34)
+
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.fromOffset(300, 46)
+    box.Position = UDim2.fromOffset(20, 190)
+    box.BackgroundColor3 = COLORS.item
+    box.BorderSizePixel = 0
+    box.Text = ""
+    box.PlaceholderText = T("Код")
+    box.PlaceholderColor3 = COLORS.sub
+    box.TextColor3 = COLORS.accent
+    box.Font = Enum.Font.GothamBold
+    box.TextSize = 17
+    box.ClearTextOnFocus = false
+    box.ZIndex = 62
+    box.Parent = card
+    corner(box, 23)
+    stroke(box, COLORS.outline, 0.5, 1)
+
+    local status = centered("", 12, COLORS.danger, Enum.Font.GothamMedium, 242, 18)
+
+    local function bigBtn(text, x, y, w, filled)
+        local b = makeBtn(card)
+        b.Size = UDim2.fromOffset(w, 46)
+        b.Position = UDim2.fromOffset(x, y)
+        b.BackgroundColor3 = filled and COLORS.accent or COLORS.highest
+        b.Text = text
+        b.TextSize = 14
+        b.Font = Enum.Font.GothamBold
+        b.TextColor3 = filled and COLORS.onAccent or COLORS.text
+        b.ZIndex = 62
+        corner(b, 23)
+        hoverFx(b, filled and COLORS.accent or COLORS.highest, filled and COLORS.accent3 or COLORS.selected)
+        return b
+    end
+    local okBtn = bigBtn(T("Войти"), 20, 270, 300, true)
+    local copyBtn = bigBtn(T("Копировать ссылку на Telegram"), 20, 322, 300, false)
+    copyBtn.TextSize = 13
+
+    local closed = false
+    local function tryCode()
+        if normCode(box.Text) == ACCESS_CODE then
+            accessOk = true
+            pcall(function() if writefile then writefile(ACCESS_FILE, ACCESS_CODE) end end)
+        else
+            status.TextColor3 = COLORS.danger
+            status.Text = T("Неверный код")
+        end
+    end
+    okBtn.Activated:Connect(tryCode)
+    box.FocusLost:Connect(function(enter) if enter then tryCode() end end)
+    copyBtn.Activated:Connect(function()
+        local copied = false
+        pcall(function() if setclipboard then setclipboard(TG_LINK) copied = true end end)
+        status.TextColor3 = COLORS.accent
+        status.Text = copied and T("Ссылка скопирована: t.me/fiskgrov") or TG_LINK
+    end)
+
+    local closeLbl = makeBtn(card)
+    closeLbl.Size = UDim2.fromOffset(300, 28)
+    closeLbl.Position = UDim2.fromOffset(20, 358)
+    closeLbl.BackgroundTransparency = 1
+    closeLbl.Text = T("Закрыть")
+    closeLbl.TextSize = 12
+    closeLbl.Font = Enum.Font.GothamMedium
+    closeLbl.TextColor3 = COLORS.sub
+    closeLbl.ZIndex = 62
+    closeLbl.Activated:Connect(function() closed = true end)
+
+    while not accessOk and not closed and gui.Parent do
+        task.wait(0.05)
+    end
+    if not accessOk then
+        pcall(function() gui:Destroy() end)
+        return
+    end
+    overlay:Destroy()
 end
 
 -- ========= Главное окно =========
@@ -2232,25 +2387,10 @@ do
     end)
 end
 
--- ========= Маршрут к двери: фиксированные стрелки (локально, только по кнопке) =========
-State.routeOn = true   -- разрешён; рисуется ТОЛЬКО пока идёт погоня Seek
-State.seekJump = true
-State.seekCrouch = true
-
+-- ========= Seek =========
+-- Маршрут и стрелки на Seek удалены. Оставлено только определение погони (нужно для диагностики).
 local SK = {}
-
 do
-    local PathfindingService = game:GetService("PathfindingService")
-    local ROUTE_COLOR = COLORS.door
-    local JUMP_COLOR = COLORS.danger
-    local CROUCH_COLOR = COLORS.egg
-    local ARROW_GAP = 7
-    local ARROW_COLOR = COLORS.accent
-    local MAX_LEN = 260
-    local STAND_H, CROUCH_H = 5, 2.6   -- высота агента стоя / в приседе
-    local LOW_CEILING = 5.2            -- ниже этого потолка стоя не пройти
-
-    -- Seek нужен только для диагностики
     local seekModels = {}
     local function trackSeek(inst)
         if inst:IsA("Model") and (inst.Name == "SeekMoving" or inst.Name == "SeekMovingNewClone")
@@ -2274,574 +2414,7 @@ do
         return false
     end
 
-    local folder = nil
-    local route = nil      -- { pts, parts, goal, progress, hidden }
-    local markers = {}     -- { part, bb, tl, pos, idx, endIdx, kind }
-    local computing = false
-    local lastCompute = 0
-    local failDoor = nil
-    local partialDoor = nil
-
-    local function ensureFolder()
-        if folder and folder.Parent then return end
-        folder = Instance.new("Folder")
-        folder.Name = "FG_" .. tostring(math.random(10000, 99999))
-        folder.Parent = workspace.CurrentCamera or workspace
-    end
-
-    local function killMarkers()
-        for _, m in ipairs(markers) do
-            pcall(function() m.bb:Destroy() end)
-        end
-        markers = {}
-    end
-
-    local objMarks = {}    -- [объект] = { bb, tl }  (GUI, пересоздаётся)
-    local objState = {}    -- [объект] = { passed, gone }  (живёт до конца погони)
-
-    function SK.clear()
-        if folder then pcall(function() folder:ClearAllChildren() end) end
-        killMarkers()
-        for _, m in pairs(objMarks) do pcall(function() m.bb:Destroy() end) end
-        objMarks = {}
-        route = nil
-    end
-
-    local function newPart(size, cf, color)
-        local p = Instance.new("Part")
-        p.Anchored = true
-        p.CanCollide = false
-        p.CanQuery = false
-        p.CanTouch = false
-        p.CastShadow = false
-        p.Material = Enum.Material.Neon
-        p.Color = color
-        p.Size = size
-        p.CFrame = cf
-        p.Parent = folder
-        return p
-    end
-
-    local function flat(v)
-        return Vector3.new(v.X, 0, v.Z)
-    end
-
-    local STRIP_W = 1.5
-    local STRIP_UP = Vector3.new(0, 0.12, 0)
-
-    -- плоская полоса, как линия маршрута в навигаторе
-    local function ribbon(a, b, color)
-        local len = (b - a).Magnitude
-        if len < 0.05 then return nil end
-        return newPart(Vector3.new(STRIP_W, 0.12, len), CFrame.lookAt((a + b) / 2, b), color)
-    end
-
-    -- круглый стык, чтобы повороты были плавными
-    local function disc(pos, diameter, color)
-        local p = newPart(Vector3.new(0.12, diameter, diameter),
-            CFrame.new(pos) * CFrame.Angles(0, 0, math.pi / 2), color)
-        p.Shape = Enum.PartType.Cylinder
-        return p
-    end
-
-    -- аккуратная стрелка-шеврон поверх полосы
-    local function chevron(pos, dir, color)
-        local right = dir:Cross(Vector3.yAxis)
-        local apex = pos + Vector3.new(0, 0.26, 0) + dir * 0.8
-        local out = {}
-        for _, side in ipairs({ 1, -1 }) do
-            local tip = apex - dir * 0.9 + right * (0.85 * side)
-            local part = newPart(Vector3.new(0.34, 0.08, (apex - tip).Magnitude + 0.08),
-                CFrame.lookAt((apex + tip) / 2, tip), color)
-            out[#out + 1] = part
-        end
-        return out
-    end
-
-    -- Цель маршрута: точка на полу ПЕРЕД дверью, а не внутри самой двери
-    -- (закрытая дверь твёрдая, pathfinding на цели внутри объекта выдаёт FailFinishNotEmpty)
-    local DOOR_OFFSET = 6
-    local doorCache = {}
-    local function doorGoals(door, rootPos)
-        if doorCache[door] then return doorCache[door] end
-        local part = door:FindFirstChild("Door")
-        if not (part and part:IsA("BasePart")) then part = getPart(door) end
-        if not part then return nil end
-
-        local cf = part.CFrame
-        local axis = (part.Size.X < part.Size.Z) and cf.RightVector or cf.LookVector
-        axis = Vector3.new(axis.X, 0, axis.Z)
-        if axis.Magnitude < 0.1 then axis = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z) end
-        axis = axis.Unit
-
-        local base = part.Position
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        local ignore = { door }
-        for _, pl in ipairs(Players:GetPlayers()) do
-            if pl.Character then table.insert(ignore, pl.Character) end
-        end
-        params.FilterDescendantsInstances = ignore
-
-        local function floorAt(p)
-            local hit = workspace:Raycast(Vector3.new(p.X, base.Y, p.Z), Vector3.new(0, -40, 0), params)
-            if hit then return hit.Position end
-            return Vector3.new(p.X, base.Y - part.Size.Y / 2, p.Z)
-        end
-
-        local pA = floorAt(base + axis * DOOR_OFFSET)
-        local pB = floorAt(base - axis * DOOR_OFFSET)
-        local goals
-        if (pA - rootPos).Magnitude <= (pB - rootPos).Magnitude then
-            goals = { pA, pB }
-        else
-            goals = { pB, pA }
-        end
-        doorCache[door] = goals
-        return goals
-    end
-
-    -- расстояние от пола до потолка над точкой (невидимые и непроходимые-насквозь детали пропускаем)
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    local function ceilingHeight(pos)
-        local ignore = {}
-        if folder then table.insert(ignore, folder) end
-        for _, pl in ipairs(Players:GetPlayers()) do
-            if pl.Character then table.insert(ignore, pl.Character) end
-        end
-        rayParams.FilterDescendantsInstances = ignore
-        local origin = pos + Vector3.new(0, 0.4, 0)
-        for _ = 1, 4 do
-            local hit = workspace:Raycast(origin, Vector3.new(0, 8, 0), rayParams)
-            if not hit then return 99 end
-            local inst = hit.Instance
-            if inst.CanCollide and inst.Transparency < 1 then
-                return hit.Position.Y - pos.Y
-            end
-            table.insert(ignore, inst)
-            rayParams.FilterDescendantsInstances = ignore
-        end
-        return 99
-    end
-
-    -- возвращает waypoints, статус. Частичные пути (ClosestNoPath) тоже отдаём.
-    local lastStatus = "?"
-    local function compute(from, goal, height, radius)
-        local ok, wps, status = pcall(function()
-            local path = PathfindingService:CreatePath({
-                AgentRadius = radius, AgentHeight = height,
-                AgentCanJump = true, WaypointSpacing = 4,
-            })
-            path:ComputeAsync(from, goal)
-            local st = path.Status
-            if st == Enum.PathStatus.Success
-                or st == Enum.PathStatus.ClosestNoPath
-                or st == Enum.PathStatus.ClosestOutOfRange then
-                local w = path:GetWaypoints()
-                if #w > 1 then return w, st end
-            end
-            return nil, st
-        end)
-        if ok then
-            lastStatus = tostring(status)
-            return wps, status
-        end
-        lastStatus = "error"
-        return nil, nil
-    end
-
-    -- пробуем обе стороны двери и два радиуса; полный путь лучше частичного
-    local function attempt(from, goals, height)
-        local partial, partialGoal
-        for _, radius in ipairs({ height < 4 and 1.5 or 1.8, 1 }) do
-            for _, g in ipairs(goals) do
-                local w, st = compute(from, g, height, radius)
-                if w then
-                    if st == Enum.PathStatus.Success then return w, g, false end
-                    if not partial then partial, partialGoal = w, g end
-                end
-            end
-        end
-        if partial then return partial, partialGoal, true end
-        return nil
-    end
-
-    local function pathLen(wps)
-        local n = 0
-        for i = 2, #wps do n += (wps[i].Position - wps[i - 1].Position).Magnitude end
-        return n
-    end
-
-    -- ===== Реальные объекты погони Seek (имена: PathLights/SeekGuidingLight, DuckBoard, Bridge) =====
-    local pathLightFolders, duckBoards, gaps = {}, {}, {}
-    local function trackObjects(inst)
-        local n = inst.Name
-        if n == "PathLights" then
-            pathLightFolders[inst] = true
-            inst.AncestryChanged:Connect(function(_, parent)
-                if not parent then pathLightFolders[inst] = nil end
-            end)
-        elseif n == "DuckBoard" and inst:IsA("Model") then
-            duckBoards[inst] = true
-            inst.AncestryChanged:Connect(function(_, parent)
-                if not parent then duckBoards[inst] = nil end
-            end)
-        elseif n == "Bridge" and inst:IsA("Model") then
-            task.spawn(function()
-                for _, c in ipairs(inst:GetChildren()) do
-                    if c.Name == "PlayerBarrier" and c:IsA("BasePart") and c.Size.Y == 2.75
-                        and (c.Rotation.X == 0 or c.Rotation.X == 180) then
-                        gaps[#gaps + 1] = { pos = (c.CFrame * CFrame.new(0, 0, -5)).Position, bridge = inst }
-                    end
-                end
-            end)
-        end
-    end
-    task.spawn(function()
-        for _, d in ipairs(workspace:GetDescendants()) do trackObjects(d) end
-    end)
-    connect(workspace.DescendantAdded, trackObjects)
-
-    local function currentLights()
-        local out = {}
-        for f in pairs(pathLightFolders) do
-            for _, ch in ipairs(f:GetChildren()) do
-                if ch.Name == "SeekGuidingLight" and ch:IsA("BasePart") then out[#out + 1] = ch end
-            end
-        end
-        return out
-    end
-
-    local function floorBelow(pos, fallbackY)
-        local ignore = {}
-        if folder then table.insert(ignore, folder) end
-        for _, pl in ipairs(Players:GetPlayers()) do
-            if pl.Character then table.insert(ignore, pl.Character) end
-        end
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = ignore
-        local hit = workspace:Raycast(pos, Vector3.new(0, -40, 0), params)
-        if hit then return hit.Position end
-        return Vector3.new(pos.X, fallbackY, pos.Z)
-    end
-
-    -- маршрут по настоящим огням Seek (точнее pathfinding); nil, если огней ещё нет
-    local function nativeWaypoints(root, goal)
-        local ls = currentLights()
-        if #ls < 3 then return nil, #ls end
-        -- порядок берём как у игры; если конец списка дальше от двери, чем начало - разворачиваем
-        if goal then
-            local first, last = ls[1].Position, ls[#ls].Position
-            if (first - goal).Magnitude < (last - goal).Magnitude then
-                local rev = {}
-                for i = #ls, 1, -1 do rev[#rev + 1] = ls[i] end
-                ls = rev
-            end
-        end
-        local bi, bd = 1, math.huge
-        for i, l in ipairs(ls) do
-            local d = (Vector3.new(l.Position.X, 0, l.Position.Z) - Vector3.new(root.Position.X, 0, root.Position.Z)).Magnitude
-            if d < bd then bi, bd = i, d end
-        end
-        local floorY = root.Position.Y - 3
-        local pts = { { Position = Vector3.new(root.Position.X, floorY, root.Position.Z) } }
-        for i = bi, #ls do
-            pts[#pts + 1] = { Position = floorBelow(ls[i].Position, floorY) }
-        end
-        if #pts < 3 then return nil, #ls end
-        return pts, #ls
-    end
-
-    local function makeObjMark(key, pos, kind)
-        ensureFolder()
-        local anchor = Instance.new("Part")
-        anchor.Anchored, anchor.CanCollide, anchor.CanQuery, anchor.CanTouch = true, false, false, false
-        anchor.Transparency = 1
-        anchor.Size = Vector3.new(0.2, 0.2, 0.2)
-        anchor.CFrame = CFrame.new(pos + Vector3.new(0, 4, 0))
-        anchor.Parent = folder
-        local bb = Instance.new("BillboardGui")
-        bb.Adornee = anchor
-        bb.AlwaysOnTop = true
-        bb.Size = UDim2.fromOffset(180, 36)
-        bb.Parent = espFolder
-        local tl = Instance.new("TextLabel")
-        tl.BackgroundTransparency = 1
-        tl.Size = UDim2.fromScale(1, 1)
-        tl.Font = Enum.Font.GothamBold
-        tl.TextSize = 22
-        tl.TextColor3 = kind == "jump" and COLORS.text or COLORS.eggText
-        tl.TextStrokeColor3 = kind == "jump" and COLORS.danger or Color3.new(0, 0, 0)
-        tl.TextStrokeTransparency = 0.2
-        tl.Parent = bb
-        objMarks[key] = { bb = bb, tl = tl }
-        return objMarks[key]
-    end
-
-    local function updateObjMark(key, pos, kind, root, speed)
-        local st = objState[key]
-        if not st then st = { passed = false, gone = false } objState[key] = st end
-        if st.gone then return end
-        local dist = flat(pos - root.Position).Magnitude
-        local m = objMarks[key]
-        if dist > 90 then
-            if m then m.bb.Enabled = false end
-            return
-        end
-        if dist < 6 then st.passed = true end
-        if st.passed and dist > 10 then
-            st.gone = true
-            if m then pcall(function() m.bb:Destroy() end) objMarks[key] = nil end
-            return
-        end
-        if not m or not m.bb.Parent then m = makeObjMark(key, pos, kind) end
-        m.bb.Enabled = true
-        local t = dist / speed
-        if kind == "jump" then
-            m.tl.Text = (t <= 0.35) and T("ПРЫГАЙ!") or (T("ПРЫГАЙ") .. string.format(" %.1f", t))
-        else
-            m.tl.Text = (t <= 0.5 or dist < 6) and T("ПРИСЯДЬ!") or (T("ПРИСЯДЬ") .. string.format(" %.1f", t))
-        end
-    end
-
-    local function updateObjMarks(root)
-        local speed = math.max(flat(root.AssemblyLinearVelocity).Magnitude, 12)
-        if State.seekCrouch then
-            for board in pairs(duckBoards) do
-                local part = board.PrimaryPart or getPart(board)
-                if part then updateObjMark(board, part.Position, "crouch", root, speed) end
-            end
-        end
-        if State.seekJump then
-            for i = #gaps, 1, -1 do
-                local g = gaps[i]
-                if not g.bridge.Parent then
-                    table.remove(gaps, i)
-                else
-                    updateObjMark(g, g.pos, "jump", root, speed)
-                end
-            end
-        end
-    end
-
-    local function makeMarker(pos, idx, endIdx, kind)
-        local anchor = newPart(Vector3.new(0.2, 0.2, 0.2), CFrame.new(pos + Vector3.new(0, 4, 0)),
-            kind == "jump" and JUMP_COLOR or CROUCH_COLOR)
-        anchor.Transparency = 1
-        local bb = Instance.new("BillboardGui")
-        bb.Adornee = anchor
-        bb.AlwaysOnTop = true
-        bb.Size = UDim2.fromOffset(180, 36)
-        bb.Parent = espFolder
-        local tl = Instance.new("TextLabel")
-        tl.BackgroundTransparency = 1
-        tl.Size = UDim2.fromScale(1, 1)
-        tl.Font = Enum.Font.GothamBold
-        tl.TextSize = 22
-        tl.TextColor3 = kind == "jump" and COLORS.text or COLORS.eggText
-        tl.TextStrokeColor3 = kind == "jump" and COLORS.danger or Color3.new(0, 0, 0)
-        tl.TextStrokeTransparency = 0.2
-        tl.Text = ""
-        tl.Parent = bb
-        markers[#markers + 1] = { part = anchor, bb = bb, tl = tl, pos = pos, idx = idx, endIdx = endIdx, kind = kind }
-    end
-
-    -- строим маршрут ОДИН раз и фиксируем в мире
-    local function build(door, goal, wps, partial, native)
-        SK.clear()
-        if not wps or #wps < 2 then
-            -- пути нет: через стены НЕ рисуем, просто сообщаем (один раз на дверь)
-            if failDoor ~= door then
-                failDoor = door
-                notify(T("Маршрут не найден") .. " (" .. lastStatus:gsub("Enum.PathStatus.", "") .. ")")
-                warn("[FiskGrow] route failed: " .. lastStatus)
-            end
-            return
-        end
-        failDoor = nil
-        if partial and partialDoor ~= door then
-            partialDoor = door
-            notify(T("Маршрут частичный"))
-        end
-        ensureFolder()
-
-        local pts = {}
-        for _, wp in ipairs(wps) do
-            pts[#pts + 1] = { pos = wp.Position, jump = (wp.Action == Enum.PathWaypointAction.Jump) }
-        end
-
-        local parts, cum, lastArrow = {}, 0, -ARROW_GAP
-        local jumpIdx
-        local crouchStart, crouchEnd, crouchClosed
-        local lastDrawn = 0
-        for i = 1, #pts - 1 do
-            local a, b = pts[i].pos, pts[i + 1].pos
-            cum += (b - a).Magnitude
-            if cum > MAX_LEN then break end
-            local list = {}
-            -- по огням Seek подсказки берём от реальных объектов (DuckBoard/Bridge), а не от догадок
-            local isJump = (not native) and pts[i + 1].jump
-            local isLow = (not native) and State.seekCrouch and (ceilingHeight(a) < LOW_CEILING
-                or ceilingHeight(a:Lerp(b, 0.5)) < LOW_CEILING)
-
-            if isLow then
-                if not crouchStart then crouchStart = i end
-                if not crouchClosed then crouchEnd = i + 1 end
-            elseif crouchStart then
-                crouchClosed = true
-            end
-
-            local color = isJump and JUMP_COLOR or (isLow and CROUCH_COLOR or ROUTE_COLOR)
-            local seg = ribbon(a + STRIP_UP, b + STRIP_UP, color)
-            if seg then list[#list + 1] = seg end
-            list[#list + 1] = disc(b + STRIP_UP, STRIP_W, color)
-
-            local dir = flat(b - a)
-            if dir.Magnitude > 0.1 then
-                dir = dir.Unit
-                if isJump and not jumpIdx and State.seekJump then
-                    jumpIdx = i + 1
-                    for _, pp in ipairs(chevron(b, dir, ARROW_COLOR)) do list[#list + 1] = pp end
-                elseif cum - lastArrow >= ARROW_GAP then
-                    lastArrow = cum
-                    for _, pp in ipairs(chevron(a:Lerp(b, 0.5), dir, ARROW_COLOR)) do list[#list + 1] = pp end
-                end
-            end
-            parts[i] = list
-            lastDrawn = i
-        end
-        -- кружок-финиш в конце маршрута
-        if lastDrawn > 0 and lastDrawn == #pts - 1 then
-            local fin = disc(pts[#pts].pos + STRIP_UP + Vector3.new(0, 0.02, 0), 3, ARROW_COLOR)
-            parts[lastDrawn][#parts[lastDrawn] + 1] = fin
-        end
-
-        route = { pts = pts, parts = parts, goal = goal, door = door, progress = 1, hidden = 0, native = native }
-        if jumpIdx then makeMarker(pts[jumpIdx].pos, jumpIdx, jumpIdx, "jump") end
-        if crouchStart then
-            makeMarker(pts[crouchStart].pos, crouchStart, crouchEnd or crouchStart, "crouch")
-        end
-    end
-
-    -- убираем пройденную часть маршрута, остальное стоит на месте
-    local function advance(root)
-        if not route then return end
-        local pts = route.pts
-        local best, bestD = route.progress, math.huge
-        for i = route.progress, math.min(route.progress + 12, #pts) do
-            local d = flat(pts[i].pos - root.Position).Magnitude
-            if d < bestD then best, bestD = i, d end
-        end
-        route.progress = best
-        for j = route.hidden + 1, best - 2 do
-            local list = route.parts[j]
-            if list then
-                for _, pp in ipairs(list) do pcall(function() pp:Destroy() end) end
-                route.parts[j] = nil
-            end
-            route.hidden = j
-        end
-        for k = #markers, 1, -1 do
-            if best > markers[k].endIdx then
-                pcall(function() markers[k].bb:Destroy() end)
-                table.remove(markers, k)
-            end
-        end
-        return bestD
-    end
-
-    local function updateCountdown(root)
-        local speed = math.max(flat(root.AssemblyLinearVelocity).Magnitude, 12)
-        for _, m in ipairs(markers) do
-            local t = flat(m.pos - root.Position).Magnitude / speed
-            if m.kind == "jump" then
-                m.tl.Text = (t <= 0.35) and T("ПРЫГАЙ!") or string.format("%.1f", t)
-            else
-                local inside = route and route.progress >= m.idx
-                if inside or t <= 0.5 then
-                    m.tl.Text = T("ПРИСЯДЬ!")
-                else
-                    m.tl.Text = T("ПРИСЯДЬ") .. string.format(" %.1f", t)
-                end
-            end
-        end
-    end
-
-    task.spawn(function()
-        while gui.Parent do
-            local char = lp.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if State.routeOn and root and SK.chaseActive() then
-                local door = getNextDoor()
-                if door then
-                    local offRoute = false
-                    if route then
-                        local d = advance(root)
-                        offRoute = d and d > 22
-                    end
-                    local doorChanged = route and route.door ~= door
-                    local needRetry = (not route) and (failDoor ~= door or os.clock() - lastCompute > 4)
-                    local nLights = #currentLights()
-                    local lightsChanged = route and ((route.native and route.native ~= nLights)
-                        or (not route.native and nLights >= 3))
-                    if (doorChanged or offRoute or needRetry or lightsChanged)
-                        and not computing and os.clock() - lastCompute > 1.5 then
-                        lastCompute = os.clock()
-                        computing = true
-                        local startPos = root.Position
-                        task.spawn(function()
-                            local goals = doorGoals(door, startPos)
-                            local use, useGoal, usePartial
-                            local nw, nCount = nativeWaypoints(root, goals and goals[1])
-                            if nw then
-                                if State.routeOn then build(door, goals and goals[1] or Vector3.zero, nw, false, nCount) end
-                                computing = false
-                                return
-                            end
-                            if goals then
-                                local w1, g1, p1 = attempt(startPos, goals, STAND_H)
-                                local w2, g2, p2
-                                if State.seekCrouch then
-                                    w2, g2, p2 = attempt(startPos, goals, CROUCH_H)
-                                end
-                                if w1 and not p1 then
-                                    use, useGoal, usePartial = w1, g1, false
-                                    if w2 and not p2 and pathLen(w2) < pathLen(w1) - 12 then
-                                        use, useGoal, usePartial = w2, g2, false -- под препятствием заметно короче
-                                    end
-                                elseif w2 and not p2 then
-                                    use, useGoal, usePartial = w2, g2, false
-                                elseif w1 then
-                                    use, useGoal, usePartial = w1, g1, true
-                                else
-                                    use, useGoal, usePartial = w2, g2, true
-                                end
-                            end
-                            if State.routeOn then build(door, useGoal or Vector3.zero, use, usePartial) end
-                            computing = false
-                        end)
-                    end
-                end
-            elseif route or folder then
-                SK.clear()
-            end
-            task.wait(0.15)
-        end
-    end)
-
-    connect(RunService.Heartbeat, function()
-        local char = lp.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if not root then return end
-        if #markers > 0 then pcall(updateCountdown, root) end
-        if State.routeOn and SK.chaseActive() then
-            pcall(updateObjMarks, root)
-        elseif next(objState) then
-            objState = {}
-        end
-    end)
+    function SK.clear() end
 end
 
 -- ========= Предупреждение Screech: куда поворачиваться =========
@@ -3101,18 +2674,6 @@ makeToggle(T("Подсветка нужной двери"), true, function(v)
 end, pages.esp)
 makeToggle(T("Авто-обнаружение новых"), true, function(v) State.autoOn = v end, pages.esp)
 makeToggle(T("Уведомления о спавне"), true, function(v) State.notifyOn = v end, pages.esp)
-makeToggle(T("Маршрут на Seek (стрелки)"), true, function(v)
-    State.routeOn = v
-    if not v then SK.clear() end
-end, pages.esp)
-makeToggle(T("Отсчёт прыжка на маршруте"), true, function(v)
-    State.seekJump = v
-    if State.routeOn then SK.clear() end -- маршрут перестроится с новой настройкой
-end, pages.esp)
-makeToggle(T("Подсказки приседания на маршруте"), true, function(v)
-    State.seekCrouch = v
-    if State.routeOn then SK.clear() end
-end, pages.esp)
 makeToggle(T("Предупреждение Screech (поворот)"), true, function(v) State.screechWarn = v end, pages.esp)
 makeToggle(T("Диагностика Seek (лог в буфер)"), false, function(v)
     State.seekDiag = v
